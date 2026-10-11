@@ -1,6 +1,11 @@
 {
   "app": "npx tsx bin/app.ts",
   "context": {
-    "@aws-cdk/aws-lambda-nodejs:useLatestRuntimeVersion": true
+    "@aws-cdk/aws-lambda-nodejs:useLatestRuntimeVersion": true,
+    "zoneName": "16watt.com",
+    "domainNames": [
+      "vtt.16watt.com",
+      "pac.16watt.com"
+    ]
   }
 }

@@ -2,6 +2,7 @@ import * as path from 'node:path';
 import { CfnOutput, Duration, Fn, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
 import { CfnStage, HttpApi, HttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
 import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import type { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import { HttpOrigin, S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
@@ -9,6 +10,8 @@ import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { Architecture, Runtime } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { AaaaRecord, ARecord, HostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
+import { CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
@@ -22,8 +25,13 @@ const CHIME_CONTROL_REGIONS = [
   'ap-northeast-1', 'ap-northeast-2', 'ap-southeast-1', 'ap-southeast-2',
 ];
 
+export interface VttStackProps extends StackProps {
+  /** Custom hostnames for the site; the certificate must be in us-east-1 (see CertStack). */
+  domain?: { zoneName: string; names: string[]; certificate: ICertificate };
+}
+
 export class VttStack extends Stack {
-  constructor(scope: Construct, id: string, props?: StackProps) {
+  constructor(scope: Construct, id: string, props: VttStackProps = {}) {
     super(scope, id, props);
 
     // ---- Join API -------------------------------------------------------------------------
@@ -95,6 +103,8 @@ export class VttStack extends Stack {
       comment: 'PAC VTT',
       defaultRootObject: 'index.html',
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
+      domainNames: props.domain?.names,
+      certificate: props.domain?.certificate,
       defaultBehavior: {
         origin: S3BucketOrigin.withOriginAccessControl(site),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -117,7 +127,19 @@ export class VttStack extends Stack {
       distributionPaths: ['/*'],
     });
 
-    new CfnOutput(this, 'SiteUrl', { value: `https://${cdn.distributionDomainName}` });
+    if (props.domain) {
+      const zone = HostedZone.fromLookup(this, 'Zone', { domainName: props.domain.zoneName });
+      const target = RecordTarget.fromAlias(new CloudFrontTarget(cdn));
+      props.domain.names.forEach((name, i) => {
+        new ARecord(this, `Alias${i}`, { zone, recordName: name, target });
+        new AaaaRecord(this, `Alias${i}v6`, { zone, recordName: name, target });
+      });
+    }
+
+    new CfnOutput(this, 'SiteUrl', {
+      value: `https://${props.domain?.names[0] ?? cdn.distributionDomainName}`,
+    });
+    new CfnOutput(this, 'CloudFrontUrl', { value: `https://${cdn.distributionDomainName}` });
     new CfnOutput(this, 'TableKeySecretName', { value: tableKey.secretName });
   }
 }

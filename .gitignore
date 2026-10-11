@@ -3,3 +3,5 @@ dist/
 cdk.out/
 *.log
 .env*
+# Route 53 lookups are cached here keyed by account id; keep them out of the public repo
+cdk.context.json

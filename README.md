@@ -14,9 +14,11 @@ Early prototype. Current state: A/V rooms with chat and dice.
 ```bash
 npm install
 aws login --profile <profile>              # profile must have a region set
-npx -w infra cdk bootstrap                 # once per account/region (with AWS_PROFILE set)
+npx -w infra cdk bootstrap                 # once per account/region (with AWS_PROFILE set), plus us-east-1 if using a custom domain
 AWS_PROFILE=<profile> npm run deploy
 ```
+
+**Custom domain.** `infra/cdk.json` sets `zoneName` and `domainNames` (currently `vtt.16watt.com` and `pac.16watt.com`). The Route 53 hosted zone must be in the deploy account. A `PacVttCert` stack in us-east-1 issues the CloudFront certificate, and `PacVtt` adds the aliases and A/AAAA records. To deploy elsewhere, change those values, or pass `-c domainNames=` to skip the custom domain and use the CloudFront URL.
 
 Players join with a shared table key, stored in Secrets Manager as `pac-vtt/table-key`.
 

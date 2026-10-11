@@ -6,7 +6,7 @@
     "dev": "npm run dev -w web",
     "build": "npm run build -w web",
     "typecheck": "npm run typecheck -w infra && npm run typecheck -w web",
-    "deploy": "npm run build -w web && npm run cdk -w infra -- deploy --require-approval never",
-    "diff": "npm run cdk -w infra -- diff"
+    "deploy": "npm run build -w web && npm run cdk -w infra -- deploy --all --require-approval never",
+    "diff": "npm run cdk -w infra -- diff --all"
   }
 }
