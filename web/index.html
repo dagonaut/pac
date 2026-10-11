@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PAC VTT</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <main id="join-view">
+      <form id="join-form" class="card">
+        <h1>PAC VTT</h1>
+        <label>Room <input name="room" required pattern="[A-Za-z0-9\-]{1,40}" autocomplete="off" /></label>
+        <label>Your name <input name="name" required maxlength="40" autocomplete="nickname" /></label>
+        <label>Table key <input name="key" type="password" required autocomplete="current-password" /></label>
+        <label class="check"><input type="checkbox" name="camera" checked /> Camera on</label>
+        <button type="submit">Join</button>
+        <p id="join-error" class="error" hidden></p>
+      </form>
+    </main>
+
+    <main id="room-view" hidden>
+      <header>
+        <strong id="room-name"></strong>
+        <button id="copy-link" type="button">Copy invite link</button>
+      </header>
+      <section id="stage"></section>
+      <aside id="side">
+        <ol id="log"></ol>
+        <div id="dice">
+          <button type="button" data-sides="4">d4</button>
+          <button type="button" data-sides="6">d6</button>
+          <button type="button" data-sides="8">d8</button>
+          <button type="button" data-sides="10">d10</button>
+          <button type="button" data-sides="12">d12</button>
+          <button type="button" data-sides="20">d20</button>
+        </div>
+        <form id="chat-form">
+          <input name="text" placeholder="Say something…" autocomplete="off" maxlength="500" />
+          <button type="submit">Send</button>
+        </form>
+      </aside>
+      <footer id="controls">
+        <button id="mic-btn" type="button">Mute</button>
+        <button id="cam-btn" type="button">Camera off</button>
+        <select id="mic-select" title="Microphone"></select>
+        <select id="cam-select" title="Camera"></select>
+        <select id="spk-select" title="Speaker"></select>
+        <button id="leave-btn" type="button" class="danger">Leave</button>
+      </footer>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
