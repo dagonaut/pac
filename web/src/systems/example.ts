@@ -19,4 +19,26 @@ export const example: GameSystem = {
     slots: ['Weapon', 'Armor', 'Gear', 'Gear', 'Gear'],
     fields: { HP: '10', Charge: '0' },
   },
+  actions: [
+    {
+      label: 'Refill market',
+      title: 'Draw from the loot deck until the market has 4 cards',
+      run: ({ state }) => {
+        const inMarket = Object.values(state.pieces).filter((p) => p.zone === 'market').length;
+        const inDeck = Object.values(state.pieces).filter((p) => p.zone === 'loot').length;
+        if (inMarket >= 4) return 'The market already has 4 cards.';
+        if (!inDeck) return 'The loot deck is empty.';
+        return [{ kind: 'draw', from: 'loot', to: 'market', count: 4 - inMarket }];
+      },
+    },
+    {
+      label: 'Untap all',
+      title: 'Untap every card on the table and on sheets',
+      run: ({ state }) => {
+        const tapped = Object.values(state.pieces).filter((p) => p.tapped);
+        if (!tapped.length) return 'Nothing is tapped.';
+        return tapped.map((p) => ({ kind: 'piece.update', id: p.id, set: { tapped: false } }));
+      },
+    },
+  ],
 };

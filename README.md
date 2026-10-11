@@ -37,10 +37,17 @@ export const mygame: GameSystem = {
     { kind: 'zone.create', zone: { id: 'table', kind: 'board', label: 'Table' } },
   ],
   sheet: { slots: ['Weapon', 'Armor', 'Gear'], fields: { HP: '10' } },  // "Create my sheet"
+  actions: [{                         // buttons above the table
+    label: 'Refill market',
+    run: ({ state }) => {             // return ops (sent as one batch = one undo), or a message
+      const n = Object.values(state.pieces).filter((p) => p.zone === 'market').length;
+      return n >= 4 ? 'Market is full.' : [{ kind: 'draw', from: 'loot', to: 'market', count: 4 - n }];
+    },
+  }],
 };
 ```
 
-Zone kinds: `deck` (hidden, random draws), `row` (face-up line), `board` (free placement), `slots` (named or free slots, used for sheets), `discard`, `hand`. Custom actions and renderers will be added to the contract when a game needs them.
+Zone kinds: `deck` (hidden, random draws), `row` (face-up line), `board` (free placement), `slots` (named or free slots, used for sheets), `discard`, `hand`. Actions can only produce ordinary ops, so the server validates them like anything else. Custom card or sheet renderers will be added to the contract when a game needs them.
 
 ## Data
 

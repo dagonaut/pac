@@ -7,6 +7,7 @@ import { h, shortId } from './dom';
 import { createDrawing } from './draw';
 import { cardName, faceOf, pieceEl, prunePieceEls } from './pieces';
 import { renderDock } from './sheets';
+import { systems } from './systems/index';
 
 export interface TableCtx {
   me(): string;
@@ -607,7 +608,22 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     addBtn.addEventListener('click', () => addZoneMenu(addBtn.getBoundingClientRect()));
     const importBtn = h('button.bar-btn', { type: 'button', onclick: () => ctx.openImport() }, 'Import cards');
     const libraryBtn = h('button.bar-btn', { type: 'button', onclick: () => openLibrary() }, 'Library');
-    bar.replaceChildren(...shared.map((z) => renderZone(z, state)), h('div.bar-actions', {}, importBtn, libraryBtn, addBtn));
+    const actions = (systems.find((s) => s.id === state.system)?.actions ?? []).map((a) =>
+      h('button.bar-btn.system-action', {
+        type: 'button',
+        title: a.title ?? '',
+        onclick: () => {
+          const out = a.run({ state: st(), me: me() });
+          if (typeof out === 'string') ctx.note(out);
+          else if (out.length) void ctx.act(out.length === 1 ? out[0] : { kind: 'batch', ops: out });
+        },
+      }, a.label));
+    bar.replaceChildren(
+      ...shared.map((z) => renderZone(z, state)),
+      h('div.bar-right', {},
+        actions.length ? h('div.bar-actions', {}, ...actions) : null,
+        h('div.bar-actions', {}, importBtn, libraryBtn, addBtn)),
+    );
     hint.hidden = !!table && Object.values(state.pieces).some((p) => p.zone === table.id);
 
     const keep = new Set<string>();

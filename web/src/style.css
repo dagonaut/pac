@@ -522,11 +522,21 @@ form.inline input {
   flex-direction: column;
   gap: 6px;
   justify-content: center;
-  margin-left: auto;
 }
 
 .bar-btn {
   white-space: nowrap;
+}
+
+.bar-right {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  align-self: center;
+}
+
+.system-action {
+  border-color: var(--accent);
 }
 
 .table-area {

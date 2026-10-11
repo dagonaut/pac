@@ -119,6 +119,13 @@ await ana.keyboard.press('Control+z');
 await ana.waitForFunction(() => (document.querySelector('.field input[data-field$="/HP"]') as HTMLInputElement)?.value === '10');
 await shot(ana, '05-sheet');
 
+// System actions (Example system): Untap all, and Refill market's message when the deck is empty.
+assert.equal(await ana.locator('.piece.tapped').count(), 1);
+await ana.click('.system-action:text-is("Untap all")');
+await ana.waitForFunction(() => !document.querySelector('.piece.tapped'));
+await ana.click('.system-action:text-is("Refill market")');
+await untilLog(ana, 'The loot deck is empty.');
+
 // Library: add a second copy to the table, then make it bigger.
 await ana.click('.bar-actions >> text=Library');
 await ana.click('dialog .library .thumb');
