@@ -53,6 +53,7 @@ export function pieceEl(p: Piece, state: RoomState, me: string): HTMLElement {
     if (face.secret) badges.append(h('span.badge.secret', { title: 'Hidden from other players' }, '👁'));
     el.replaceChildren(body, badges);
   }
+  el.style.setProperty('--scale', String(p.scale ?? 1));
   el.classList.toggle('tapped', p.tapped);
   el.classList.toggle('face-down', !face.front);
   el.title = cardName(p, state, me);

@@ -613,7 +613,70 @@ form.inline input {
 
 .table-surface .piece {
   position: absolute;
-  --card-w: 110px;
+  --card-w: calc(110px * var(--scale, 1));
+}
+
+.table-hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: var(--muted-text);
+  pointer-events: none;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.table-surface.grid {
+  background-image: linear-gradient(#2d261e 1px, transparent 1px), linear-gradient(90deg, #2d261e 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.zoom label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-right: 6px;
+  color: var(--muted-text);
+}
+
+.size-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+}
+
+.size-row span {
+  flex: 1;
+}
+
+.size-row button {
+  padding: 0 7px;
+}
+
+.library {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 10px;
+  max-height: 65vh;
+  overflow-y: auto;
+  margin-bottom: 0.8rem;
+}
+
+.library figure {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 0.75rem;
+  color: var(--muted-text);
+}
+
+.library figcaption {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .piece.dragging {

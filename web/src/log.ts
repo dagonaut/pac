@@ -9,9 +9,11 @@ function scrollToEnd() {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-function describe(op: Op, state: RoomState, me: string): string {
-  // Don't spoil face-down or hidden cards in the log.
+function describe(op: Op, state: RoomState, me: string, names: Record<string, string> = {}): string {
+  // Names recorded when it happened (public cards only), else what you can see now. Face-down or
+  // hidden cards aren't spoiled either way.
   const card = (id: string) => {
+    if (names[id]) return names[id];
     const p = state.pieces[id];
     if (!p) return 'a card';
     const name = cardName(p, state, me);
@@ -38,6 +40,7 @@ function describe(op: Op, state: RoomState, me: string): string {
       if (s.visibleTo !== undefined) return s.visibleTo === 'all' ? `revealed ${card(op.id)}` : 'hid a card from players';
       if (s.counters !== undefined) return `changed counters on ${card(op.id)}`;
       if (s.note !== undefined) return `wrote a note on ${card(op.id)}`;
+      if (s.scale !== undefined) return `resized ${card(op.id)}`;
       if (s.x !== undefined) return `moved ${card(op.id)}`;
       return `changed ${card(op.id)}`;
     }
@@ -74,7 +77,7 @@ export function addEntry(entry: LogEntry, state: RoomState, me: string) {
     li.append(total);
   } else {
     li.className = 'action';
-    li.append(` ${describe(op, state, me)}`);
+    li.append(` ${describe(op, state, me, entry.names)}`);
   }
   logEl.append(li);
   scrollToEnd();

@@ -10,7 +10,7 @@ import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { APIGatewayProxyResultV2, APIGatewayProxyWebsocketEventV2 } from 'aws-lambda';
-import { apply, OpError, resolve } from '../../shared/engine.ts';
+import { apply, OpError, publicNames, resolve } from '../../shared/engine.ts';
 import type { LogEntry, Op, RoomState } from '../../shared/model.ts';
 import { CHUNK_CHARS, type ClientMessage, type ServerMessage } from '../../shared/protocol.ts';
 import { connSk, ddb, GAME_TABLE, loadState, logSk, roomPk, stateItem, verifySession } from './common.ts';
@@ -101,6 +101,7 @@ const toEntry = (item: Record<string, unknown>): LogEntry => ({
   ts: item.ts as string,
   op: JSON.parse(item.op as string),
   cid: item.cid as string | undefined,
+  names: item.names as Record<string, string> | undefined,
 });
 
 /** Your most recent undoable, not-yet-undone action. */
@@ -123,7 +124,7 @@ async function commit(room: string, name: string, op: Op, cid: string): Promise<
     const inverse = apply(next, resolved);
     next.seq = current.seq + 1;
 
-    const entry: LogEntry = { seq: next.seq, by: name, ts: new Date().toISOString(), op: resolved, cid };
+    const entry: LogEntry = { seq: next.seq, by: name, ts: new Date().toISOString(), op: resolved, cid, names: publicNames(next, resolved) };
     try {
       await ddb.send(
         new TransactWriteCommand({
@@ -145,6 +146,7 @@ async function commit(room: string, name: string, op: Op, cid: string): Promise<
                   ...entry,
                   op: JSON.stringify(resolved),
                   inverse: inverse ? JSON.stringify(inverse) : undefined,
+                  names: entry.names,
                 },
               },
             },

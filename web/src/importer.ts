@@ -21,7 +21,7 @@ interface Upload {
   path: string;
 }
 
-async function uploadUrls(token: string, files: File[]): Promise<Upload[]> {
+export async function uploadUrls(token: string, files: File[]): Promise<Upload[]> {
   const out: Upload[] = [];
   for (let i = 0; i < files.length; i += URL_CHUNK) {
     const chunk = files.slice(i, i + URL_CHUNK);
@@ -37,12 +37,20 @@ async function uploadUrls(token: string, files: File[]): Promise<Upload[]> {
   return out;
 }
 
-async function uploadOne(file: File, u: Upload) {
+export async function uploadOne(file: File, u: Upload) {
   const form = new FormData();
   for (const [k, v] of Object.entries(u.fields)) form.append(k, v);
   form.append('file', file);
   const res = await fetch(u.url, { method: 'POST', body: form });
   if (!res.ok) throw new Error(`Uploading ${file.name} failed (${res.status}).`);
+}
+
+/** Upload one image and return its /assets/... path. */
+export async function uploadImage(token: string, file: File): Promise<string> {
+  if (!TYPES.includes(file.type)) throw new Error(`${file.name} isn't a PNG, JPEG, WebP, GIF or AVIF image.`);
+  const [u] = await uploadUrls(token, [file]);
+  await uploadOne(file, u);
+  return u.path;
 }
 
 /** "S-01 Laser Rifle.png" -> "S-01 Laser Rifle" */

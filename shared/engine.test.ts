@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { describeRoll, roll } from './dice.ts';
-import { apply, newPiece, OpError, resolve } from './engine.ts';
+import { apply, newPiece, OpError, publicNames, resolve } from './engine.ts';
 import { emptyRoom, type Op, type RoomState } from './model.ts';
 
 const fixed = (n: number) => () => n; // rand() that always returns n
@@ -46,6 +46,26 @@ test('piece.update reverses, including moves and counters', () => {
   const s = room();
   roundTrip(s, { kind: 'piece.update', id: 'p1', set: { zone: 'board', x: 10, y: 20, faceUp: true } });
   roundTrip(s, { kind: 'piece.update', id: 'p1', set: { counters: { dmg: 2 }, note: 'hi', tapped: true } });
+});
+
+test('scale and owner reverse even when they were unset', () => {
+  const s = room();
+  roundTrip(s, { kind: 'piece.update', id: 'p1', set: { scale: 3 } });
+  roundTrip(s, { kind: 'piece.update', id: 'p1', set: { owner: 'Ana' } });
+  assert.throws(() => apply(s, { kind: 'piece.update', id: 'p1', set: { scale: 100 } }), OpError);
+});
+
+test('publicNames only names face-up, unhidden cards', () => {
+  const s = room();
+  apply(s, { kind: 'card.create', card: { id: 'c1', name: 'One', front: '/1' } });
+  apply(s, { kind: 'card.create', card: { id: 'c2', name: 'Two', front: '/2' } });
+  apply(s, { kind: 'piece.update', id: 'p1', set: { faceUp: true } });
+  apply(s, { kind: 'piece.update', id: 'p2', set: { faceUp: true, visibleTo: 'gm' } });
+  const op: Op = { kind: 'batch', ops: [
+    { kind: 'piece.update', id: 'p1', set: { tapped: true } },
+    { kind: 'piece.update', id: 'p2', set: { tapped: true } },
+  ] };
+  assert.deepEqual(publicNames(s, op), { p1: 'One' });
 });
 
 test('moving to a zone without an index appends', () => {

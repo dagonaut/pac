@@ -92,7 +92,7 @@ await untilLog(ana, 'flipped');
 
 // ---- Bo joins from the invite link and sees the same table -------------------------------------
 const bo = await player('Bo', `${site}/?room=${roomId}`);
-await bo.click('#room-list li.invited button');
+await bo.click('#room-list li.invited button:text-is("Join")');
 await bo.waitForSelector('#room-view:not([hidden])', { timeout: 20000 });
 await bo.waitForSelector('.table-surface .piece.tapped.face-down');
 assert.match(await log(bo), /imported/);
@@ -118,6 +118,17 @@ await ana.waitForFunction(() => (document.querySelector('.field input[data-field
 await ana.keyboard.press('Control+z');
 await ana.waitForFunction(() => (document.querySelector('.field input[data-field$="/HP"]') as HTMLInputElement)?.value === '10');
 await shot(ana, '05-sheet');
+
+// Library: add a second copy to the table, then make it bigger.
+await ana.click('.bar-actions >> text=Library');
+await ana.click('dialog .library .thumb');
+await ana.click('.menu .menu-item:text-is("Table")');
+await ana.waitForSelector('.table-surface .piece');
+await ana.click('dialog >> text=Close');
+await ana.locator('.table-surface .piece').click();
+await ana.click('.menu .size-row button[title=Bigger]');
+await ana.waitForFunction(() => (document.querySelector('.table-surface .piece') as HTMLElement)?.style.getPropertyValue('--scale') === '1.5');
+await shot(ana, '05b-library-copy-bigger');
 
 // Bo sees Ana's sheet tab with the card in the Weapon slot.
 await bo.click('.dock-tab:text("Ana")');

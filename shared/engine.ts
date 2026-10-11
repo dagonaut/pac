@@ -64,6 +64,7 @@ function checkPieceProps(set: Partial<PieceProps>, state: RoomState) {
         case 'note': return isText(v, 1000);
         case 'visibleTo': return VISIBILITY.includes(v as Visibility);
         case 'owner': return v === undefined || isText(v, 40);
+        case 'scale': return isNum(v) && v >= 0.2 && v <= 20;
         case 'counters':
           return !!v && typeof v === 'object' && Object.keys(v).length <= 20 &&
             Object.entries(v).every(([name, n]) => isText(name, 30) && isNum(n));
@@ -234,8 +235,14 @@ export function apply(state: RoomState, op: Op): Op | null {
       const set: Partial<PieceProps> = { ...op.set };
       // Moving to another zone without an index appends to the end of it.
       if (set.zone !== undefined && set.zone !== p.zone && set.index === undefined) set.index = nextIndex(state, set.zone);
-      const prev = Object.fromEntries(Object.keys(set).map((k) => [k, structuredClone(p[k as keyof PieceProps])]));
+      // JSON drops undefined, so optional fields go into the inverse as their defaults.
+      const defaults: Partial<PieceProps> = { scale: 1, owner: '' };
+      const prev = Object.fromEntries(
+        Object.keys(set).map((k) => [k, structuredClone(p[k as keyof PieceProps] ?? defaults[k as keyof PieceProps])]),
+      );
       Object.assign(p, structuredClone(set));
+      if (p.scale === 1) delete p.scale;
+      if (p.owner === '') delete p.owner;
       return { kind: 'piece.update', id: op.id, set: prev as Partial<PieceProps> };
     }
 
@@ -273,6 +280,29 @@ export function apply(state: RoomState, op: Op): Op | null {
     default:
       fail(`Unknown op "${(op as { kind: string }).kind}".`);
   }
+}
+
+/** Piece ids an op touches. */
+function touched(op: Op): string[] {
+  switch (op.kind) {
+    case 'piece.create': return [op.piece.id];
+    case 'piece.update': case 'piece.delete': return [op.id];
+    case 'draw': return op.ids ?? [];
+    case 'batch': return op.ops.flatMap(touched);
+    case 'undo': return op.op ? touched(op.op) : [];
+    default: return [];
+  }
+}
+
+/** Names of the cards an op touched that everyone can see (face up, not hidden), for the log. */
+export function publicNames(state: RoomState, op: Op): Record<string, string> | undefined {
+  const names: Record<string, string> = {};
+  for (const id of touched(op).slice(0, 50)) {
+    const p = state.pieces[id];
+    const card = p && state.cards[p.def];
+    if (card && p.faceUp && p.visibleTo === 'all') names[id] = card.name;
+  }
+  return Object.keys(names).length ? names : undefined;
 }
 
 /** A new face-down piece for a card, ready for piece.create. */

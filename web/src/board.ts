@@ -1,6 +1,7 @@
 // The shared table: zone bar (decks, rows, discards), the free-placement table surface, the sheet
 // dock, drag and drop between any of them, card/zone menus and the hover preview. Every change goes
 // out as an op; the screen only changes when the server's broadcast comes back.
+import { newPiece } from '../../shared/engine.ts';
 import type { Op, Piece, PieceProps, RoomState, Zone, ZoneKind } from '../../shared/model.ts';
 import { h, shortId } from './dom';
 import { cardName, faceOf, pieceEl, prunePieceEls } from './pieces';
@@ -12,6 +13,8 @@ export interface TableCtx {
   act(op: Op): Promise<boolean>;
   note(msg: string): void;
   openImport(zoneId?: string): void;
+  /** Upload an image; resolves to its /assets/... path. */
+  upload(file: File): Promise<string>;
 }
 
 const TABLE_W = 3200;
@@ -27,8 +30,25 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
   const surface = h('div.table-surface', { style: { width: `${TABLE_W}px`, height: `${TABLE_H}px` } });
   const wrap = h('div.table-wrap', {}, surface);
   const zoomLabel = h('span', {}, '100%');
+  let snap = localStorage.getItem('vtt.snap') === '1';
+  const snapBox = h('input', {
+    type: 'checkbox',
+    checked: snap,
+    onchange: () => {
+      snap = snapBox.checked;
+      surface.classList.toggle('grid', snap);
+      try {
+        localStorage.setItem('vtt.snap', snap ? '1' : '0');
+      } catch { /* ignore */ }
+    },
+  });
+  surface.classList.toggle('grid', snap);
+  const GRID = 40;
+  const hint = h('div.table-hint', {},
+    h('div', {}, 'Drag cards here from a row, sheet or pile.', h('br'), 'Drag empty space to pan · Ctrl+scroll to zoom · hover a card and press F / T / U'));
   const zoomBox = h('div.zoom',
     {},
+    h('label', { title: 'Snap cards to a 40px grid when you drop them' }, snapBox, 'Grid'),
     h('button', { type: 'button', title: 'Zoom out', onclick: () => setZoom(zoom / 1.2) }, '−'),
     zoomLabel,
     h('button', { type: 'button', title: 'Zoom in', onclick: () => setZoom(zoom * 1.2) }, '+'),
@@ -36,7 +56,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
   const dock = h('div.sheet-dock');
   const preview = h('div.preview', { hidden: true });
   const menu = h('div.menu', { hidden: true });
-  root.replaceChildren(bar, h('div.table-area', {}, wrap, zoomBox), dock, preview);
+  root.replaceChildren(bar, h('div.table-area', {}, wrap, hint, zoomBox), dock, preview);
   document.body.append(menu);
 
   let zoom = Number(localStorage.getItem('vtt.zoom')) || 1;
@@ -87,6 +107,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
   function closeMenu() {
     menu.hidden = true;
     menu.replaceChildren();
+    if (menu.parentElement !== document.body) document.body.append(menu);
   }
 
   function openMenu(anchor: DOMRect, ...items: (Node | false | null | undefined)[]) {
@@ -138,6 +159,20 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     );
   }
 
+  function sizeRow(p: Piece) {
+    const scale = p.scale ?? 1;
+    const set = (v: number) => {
+      closeMenu();
+      void update(p.id, { scale: Math.round(Math.min(20, Math.max(0.2, v)) * 100) / 100 });
+    };
+    return h('div.size-row', {},
+      h('span', {}, `Size ${Math.round(scale * 100)}%`),
+      h('button', { type: 'button', title: 'Smaller', onclick: () => set(scale / 1.5) }, '−'),
+      h('button', { type: 'button', title: 'Normal size', onclick: () => set(1) }, '1×'),
+      h('button', { type: 'button', title: 'Bigger', onclick: () => set(scale * 1.5) }, '+'),
+    );
+  }
+
   function pieceMenu(p: Piece, anchor: DOMRect) {
     const card = st().cards[p.def];
     const face = faceOf(p, st(), me());
@@ -158,6 +193,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
       isGm() && item(p.visibleTo === 'all' ? 'Hide from players' : 'Show to everyone',
         () => update(p.id, { visibleTo: p.visibleTo === 'all' ? 'gm' : 'all' })),
       face.front && item('Show large', () => showPreview(p, true)),
+      st().zones[p.zone]?.kind === 'board' && sizeRow(p),
       heading('Send to'),
       ...sendToItems(p),
       h('hr'),
@@ -249,6 +285,76 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
       h('form', { method: 'dialog' }, h('button', {}, 'Close')));
     document.body.append(dialog);
     dialog.showModal();
+  }
+
+  // ---- Card library -----------------------------------------------------------------------------
+
+  /** Every imported card: add copies to any zone, set upgraded art, delete unused cards. */
+  function openLibrary() {
+    const dialog = h('dialog.modal', { onclose: () => dialog.remove() });
+    const fill = () => {
+      const state = st();
+      const cards = Object.values(state.cards).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      const inUse = (id: string) => Object.values(state.pieces).filter((p) => p.def === id).length;
+      const grid = h('div.library');
+      for (const c of cards) {
+        const thumb = h('button.thumb', { type: 'button', title: c.name }, h('img', { src: c.front, alt: '' }));
+        thumb.addEventListener('click', () => cardMenu(c.id, thumb.getBoundingClientRect(), fill));
+        const n = inUse(c.id);
+        grid.append(h('figure', {}, thumb, h('figcaption', {}, c.name), h('small', {}, `${n} in play${c.upgraded ? ' · has upgrade art' : ''}`)));
+      }
+      dialog.replaceChildren(
+        h('h3', {}, `Card library (${cards.length})`),
+        cards.length ? grid : h('p.muted', {}, 'No cards yet. Use Import cards.'),
+        h('form', { method: 'dialog' }, h('div.dialog-buttons', {}, h('button', {}, 'Close'))),
+      );
+    };
+    fill();
+    document.body.append(dialog);
+    dialog.showModal();
+  }
+
+  function cardMenu(cardId: string, anchor: DOMRect, refresh: () => void) {
+    const state = st();
+    const c = state.cards[cardId];
+    if (!c) return;
+    const used = Object.values(state.pieces).some((p) => p.def === cardId);
+    const after = (ok: boolean | Promise<boolean>) => Promise.resolve(ok).then(() => refresh());
+    const pickImage = (then: (path: string) => Promise<boolean>) => {
+      const input = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif,image/avif' });
+      input.addEventListener('change', async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        try {
+          await after(then(await ctx.upload(file)));
+        } catch (e) {
+          ctx.note((e as Error).message);
+        }
+      });
+      input.click();
+    };
+    // Menu sits above the modal dialog's top layer only if it's inside it.
+    const dlg = document.querySelector('dialog[open]');
+    if (dlg && menu.parentElement !== dlg) dlg.append(menu);
+    openMenu(anchor,
+      heading(c.name),
+      heading('Add a copy to'),
+      ...Object.values(state.zones).map((z) => item(zoneTitle(z), () => {
+        const index = Object.values(state.pieces).filter((q) => q.zone === z.id).reduce((m, q) => Math.max(m, q.index + 1), 0);
+        const pos = z.kind === 'board' ? visibleCenter() : {};
+        const piece = newPiece(`pc-${shortId()}`, cardId, z.id, { index, faceUp: z.kind !== 'deck', ...pos });
+        return after(ctx.act({ kind: 'piece.create', piece }));
+      })),
+      h('hr'),
+      item(c.upgraded ? 'Replace upgraded art…' : 'Add upgraded art…', () => pickImage((path) => ctx.act({ kind: 'card.update', id: cardId, set: { upgraded: path } }))),
+      !!c.upgraded && item('Remove upgraded art', () => after(ctx.act({ kind: 'card.update', id: cardId, set: { upgraded: '' } }))),
+      item(c.back ? 'Replace card back…' : 'Add card back…', () => pickImage((path) => ctx.act({ kind: 'card.update', id: cardId, set: { back: path } }))),
+      item('Rename…', () => {
+        const name = prompt('Card name:', c.name)?.trim().slice(0, 120);
+        if (name) return after(ctx.act({ kind: 'card.update', id: cardId, set: { name } }));
+      }),
+      !used && item('Delete from library', () => confirm(`Delete ${c.name} from the library?`) && after(ctx.act({ kind: 'card.delete', id: cardId })), { danger: true }),
+    );
   }
 
   // ---- Preview --------------------------------------------------------------------------------
@@ -362,7 +468,8 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
       const r = surface.getBoundingClientRect();
       const x = Math.round((e.clientX - d.offX - r.left) / zoom);
       const y = Math.round((e.clientY - d.offY - r.top) / zoom);
-      const pos = { x: Math.max(0, Math.min(TABLE_W - CARD_W, x)), y: Math.max(0, Math.min(TABLE_H - CARD_W, y)) };
+      const s = (v: number) => (snap ? Math.round(v / GRID) * GRID : v);
+      const pos = { x: Math.max(0, Math.min(TABLE_W - CARD_W, s(x))), y: Math.max(0, Math.min(TABLE_H - CARD_W, s(y))) };
       return zone.id === p.zone ? pos : moveSet(p, zone, pos);
     }
     if (zone.kind === 'deck' || zone.kind === 'discard') return moveSet(p, zone);
@@ -486,7 +593,9 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     const addBtn = h('button.bar-btn', { type: 'button' }, '+ Zone');
     addBtn.addEventListener('click', () => addZoneMenu(addBtn.getBoundingClientRect()));
     const importBtn = h('button.bar-btn', { type: 'button', onclick: () => ctx.openImport() }, 'Import cards');
-    bar.replaceChildren(...shared.map((z) => renderZone(z, state)), h('div.bar-actions', {}, importBtn, addBtn));
+    const libraryBtn = h('button.bar-btn', { type: 'button', onclick: () => openLibrary() }, 'Library');
+    bar.replaceChildren(...shared.map((z) => renderZone(z, state)), h('div.bar-actions', {}, importBtn, libraryBtn, addBtn));
+    hint.hidden = !!table && Object.values(state.pieces).some((p) => p.zone === table.id);
 
     const keep = new Set<string>();
     if (table) {

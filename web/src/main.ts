@@ -5,7 +5,7 @@ import type { AvSession, Participant, VideoTile } from './av';
 import { createBoard } from './board';
 import { joinChime } from './chime-av';
 import { GameClient } from './game';
-import { createImporter } from './importer';
+import { createImporter, uploadImage } from './importer';
 import { addEntry, clearLog, note, resetLog } from './log';
 import { cameraError, getPermissions, micError, pick, probeCamera } from './media';
 import { systemName, systems } from './systems/index';
@@ -276,6 +276,7 @@ const board = createBoard($('#board'), {
   act,
   note,
   openImport: createImporter({ token: () => token, state: () => game?.state ?? null, act }),
+  upload: (file) => uploadImage(token, file),
 });
 
 $('#dice').addEventListener('click', (e) => {

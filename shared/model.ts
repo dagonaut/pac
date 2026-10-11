@@ -43,6 +43,8 @@ export interface Piece {
   note: string;
   visibleTo: Visibility;
   owner?: string;
+  /** Size multiplier on the table (images, maps, tokens). Default 1. */
+  scale?: number;
 }
 
 /** Fields a piece.update may change (everything except identity). */
@@ -102,6 +104,8 @@ export interface LogEntry {
   op: Op;
   /** Client-chosen id so the sender can match the broadcast to its request. */
   cid?: string;
+  /** Names of face-up, unhidden cards the op touched, as of when it happened (for the log). */
+  names?: Record<string, string>;
 }
 
 export function emptyRoom(id: string, name: string, system: string): RoomState {
