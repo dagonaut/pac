@@ -1,6 +1,6 @@
 import type { RoomState } from '../../shared/model.ts';
 import type { RoomSummary } from '../../shared/protocol.ts';
-import { createRoom, joinRoom, listRooms } from './api';
+import { archiveRoom, createRoom, joinRoom, listRooms } from './api';
 import type { AvSession, Participant, VideoTile } from './av';
 import { createBoard } from './board';
 import { joinChime } from './chime-av';
@@ -66,9 +66,16 @@ function ago(iso: string) {
   return new Date(iso).toLocaleDateString();
 }
 
-function renderRooms(rooms: RoomSummary[]) {
-  // Invited room first.
-  rooms.sort((a, b) => Number(b.id === invitedRoom) - Number(a.id === invitedRoom));
+let showArchived = false;
+let lastRooms: RoomSummary[] = [];
+
+function renderRooms(all: RoomSummary[]) {
+  lastRooms = all;
+  // Invited room first; archived rooms only on request (or when the invite points at one).
+  const rooms = all
+    .filter((r) => showArchived || !r.archived || r.id === invitedRoom)
+    .sort((a, b) => Number(b.id === invitedRoom) - Number(a.id === invitedRoom));
+  const archivedCount = all.filter((r) => r.archived).length;
   roomList.replaceChildren(
     ...rooms.map((r) => {
       const li = document.createElement('li');
@@ -83,11 +90,46 @@ function renderRooms(rooms: RoomSummary[]) {
       btn.type = 'button';
       btn.textContent = 'Join';
       btn.addEventListener('click', () => void enterRoom(r.id, btn));
-      li.append(info, btn);
+      const archive = document.createElement('button');
+      archive.type = 'button';
+      archive.className = 'archive-btn';
+      archive.textContent = r.archived ? 'Restore' : 'Archive';
+      archive.title = r.archived ? 'Show this room in the list again' : 'Hide this room from the list (nothing is deleted)';
+      archive.addEventListener('click', async () => {
+        archive.disabled = true;
+        try {
+          await archiveRoom(who.key.value, r.id, !r.archived);
+          await loadRooms();
+        } catch (e) {
+          showLobbyError((e as Error).message);
+          archive.disabled = false;
+        }
+      });
+      li.classList.toggle('archived', !!r.archived);
+      li.append(info, archive, btn);
       return li;
     }),
   );
-  if (!rooms.length) roomList.innerHTML = '<li class="muted">No rooms yet. Create one below.</li>';
+  if (!rooms.length) {
+    const empty = document.createElement('li');
+    empty.className = 'muted';
+    empty.textContent = archivedCount ? 'No active rooms.' : 'No rooms yet. Create one below.';
+    roomList.append(empty);
+  }
+  if (archivedCount) {
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'archived-toggle';
+    toggle.textContent = showArchived ? 'Hide archived rooms' : `Show archived rooms (${archivedCount})`;
+    toggle.addEventListener('click', () => {
+      showArchived = !showArchived;
+      renderRooms(lastRooms);
+    });
+    const li = document.createElement('li');
+    li.className = 'toggle-row';
+    li.append(toggle);
+    roomList.append(li);
+  }
   const invite = $<HTMLParagraphElement>('#invite');
   invite.hidden = !invitedRoom || rooms.some((r) => r.id === invitedRoom);
   invite.textContent = invitedRoom ? `Couldn't find the room "${invitedRoom}" from your invite link.` : '';

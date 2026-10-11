@@ -1,6 +1,7 @@
 // HTTP API, all gated by the shared table key:
 //   POST /api/rooms        { key }                         -> { rooms }
 //   POST /api/rooms/create { key, name, system, setup }    -> { room }
+//   POST /api/rooms/archive { key, room, archived }        -> { ok }
 //   POST /api/join         { key, room, name }             -> { meeting, attendee, token, wsUrl, name, room }
 // and, gated by the session token from /api/join instead:
 //   POST /api/assets       { token, files: [{name, type, size}] } -> { uploads: [{url, fields, path}] }
@@ -15,7 +16,7 @@ import {
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import { S3Client } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
-import { GetCommand, PutCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
+import { GetCommand, PutCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { apply, OpError, resolve } from '../../shared/engine.ts';
@@ -100,13 +101,13 @@ async function listRooms(): Promise<{ rooms: RoomSummary[] }> {
         TableName: GAME_TABLE,
         FilterExpression: 'sk = :s',
         ExpressionAttributeValues: { ':s': STATE_SK },
-        ProjectionExpression: 'pk, #n, #sys, updated',
+        ProjectionExpression: 'pk, #n, #sys, updated, archived',
         ExpressionAttributeNames: { '#n': 'name', '#sys': 'system' },
       }),
     )
   ).Items ?? [];
   const rooms = items
-    .map((i) => ({ id: String(i.pk).slice('room#'.length), name: i.name, system: i.system, updated: i.updated }))
+    .map((i) => ({ id: String(i.pk).slice('room#'.length), name: i.name, system: i.system, updated: i.updated, archived: !!i.archived }))
     .sort((a, b) => b.updated.localeCompare(a.updated));
   return { rooms };
 }
@@ -145,6 +146,25 @@ async function createRoom(body: Record<string, unknown>) {
     }
   }
   throw new HttpError(409, 'Could not find a free room id; try another name.');
+}
+
+/** Archiving only hides a room from the lobby; its state, log and art are untouched. */
+async function archiveRoom(body: Record<string, unknown>) {
+  const room = String(body.room ?? '');
+  if (!/^[a-z0-9-]{1,40}$/.test(room)) throw new HttpError(400, 'Bad room.');
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: GAME_TABLE,
+      Key: { pk: `room#${room}`, sk: STATE_SK },
+      UpdateExpression: 'SET archived = :a',
+      ConditionExpression: 'attribute_exists(pk)',
+      ExpressionAttributeValues: { ':a': body.archived !== false },
+    }));
+  } catch (e) {
+    if (e instanceof ConditionalCheckFailedException) throw new HttpError(404, 'No such room.');
+    throw e;
+  }
+  return { ok: true };
 }
 
 async function join(body: Record<string, unknown>) {
@@ -219,6 +239,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
     switch (event.routeKey) {
       case 'POST /api/rooms': return json(200, await listRooms());
       case 'POST /api/rooms/create': return json(200, await createRoom(body));
+      case 'POST /api/rooms/archive': return json(200, await archiveRoom(body));
       case 'POST /api/join': return json(200, await join(body));
       default: return json(404, { error: 'Not found.' });
     }

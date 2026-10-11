@@ -106,6 +106,27 @@ button.danger {
   background: var(--panel-2);
 }
 
+#room-list li.archived {
+  opacity: 0.6;
+}
+
+#room-list .archive-btn,
+.archived-toggle {
+  background: none;
+  font-size: 0.8rem;
+  padding: 2px 8px;
+  color: var(--muted-text);
+}
+
+#room-list .archive-btn {
+  margin-left: auto;
+}
+
+#room-list li.toggle-row {
+  background: none;
+  padding: 0;
+}
+
 #room-list li.invited {
   outline: 2px solid var(--accent);
 }

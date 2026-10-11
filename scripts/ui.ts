@@ -2,7 +2,7 @@
 // drag and drop, preview, tap/flip, sheets, fields and undo, and check they see the same thing.
 //   PAC_KEY=<table key> npx tsx scripts/ui.ts [site] [card image] [screenshot dir]
 // Defaults: http://localhost:5173 (run `VTT_SITE_URL=https://vtt.16watt.com npm run dev`),
-// the first image in images/, and ./ui-shots. Leaves a room "zz-ui-<time>" behind.
+// the first image in images/, and ./ui-shots. Archives its room "zz-ui-<time>" at the end.
 import assert from 'node:assert/strict';
 import { mkdirSync, readdirSync } from 'node:fs';
 import path from 'node:path';
@@ -129,5 +129,9 @@ await bo.fill('#roll-form input', '2d6+1');
 await bo.click('#roll-form button');
 await untilLog(ana, 'rolled 2d6+1');
 
-console.log(`OK: ${roomId}. Screenshots in ${shots}/`);
+const archived = await fetch(`${site}/api/rooms/archive`, {
+  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, room: roomId, archived: true }),
+});
+assert.ok(archived.ok, 'archived the test room');
+console.log(`OK: ${roomId} (archived). Screenshots in ${shots}/`);
 await browser.close();

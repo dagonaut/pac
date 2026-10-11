@@ -68,7 +68,8 @@ export async function loadState(room: string): Promise<RoomState | null> {
   return item ? (JSON.parse(item.data) as RoomState) : null;
 }
 
-/** DynamoDB item for a room's state. Summary fields are copied out for the lobby list. */
+/** DynamoDB item for a room's state. Summary fields are copied out for the lobby list.
+ *  Writing it drops `archived`, so playing in an archived room brings it back to the lobby. */
 export function stateItem(state: RoomState) {
   return {
     pk: roomPk(state.id),

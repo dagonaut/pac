@@ -27,5 +27,8 @@ export const listRooms = (key: string) => post<{ rooms: RoomSummary[] }>('/api/r
 export const createRoom = (key: string, name: string, system: string, setup: Op[]) =>
   post<{ room: RoomSummary }>('/api/rooms/create', { key, name, system, setup });
 
+export const archiveRoom = (key: string, room: string, archived: boolean) =>
+  post<{ ok: true }>('/api/rooms/archive', { key, room, archived });
+
 export const joinRoom = (key: string, room: string, name: string) =>
   post<JoinResponse>('/api/join', { key, room, name });

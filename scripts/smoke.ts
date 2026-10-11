@@ -1,7 +1,7 @@
 // End-to-end check against a deployed stack: two players in a throwaway room exercise rolls,
 // chat, draws and undo over the real WebSocket, using the browser's GameClient.
 //   PAC_KEY=<table key> npx tsx scripts/smoke.ts [https://vtt.16watt.com]
-// Leaves a room named "zz-smoke-<time>" behind; delete it afterwards if you like.
+// Archives its room "zz-smoke-<time>" at the end (data and uploaded test images remain).
 import assert from 'node:assert/strict';
 import { newPiece } from '../shared/engine.ts';
 import type { LogEntry, Op, RoomState } from '../shared/model.ts';
@@ -129,4 +129,7 @@ assert.deepEqual(cy.game.state, ana.game.state, 'late joiner matches');
 
 for (const p of [ana, bo, cy]) p.game.close();
 console.log(`OK in ${Date.now() - t0} ms: rolls, chat, draw, rejected ops, undo, uploads, late join all agree.`);
-console.log(`Clean up: room ${room.id} and assets/${room.id}/`);
+await post('/api/rooms/archive', { room: room.id, archived: true });
+const listed = (await post('/api/rooms', {})).rooms.find((r: { id: string }) => r.id === room.id);
+assert.equal(listed?.archived, true, 'room archived');
+console.log(`Archived ${room.id} (its data and assets/${room.id}/ remain).`);

@@ -32,6 +32,8 @@ export interface RoomSummary {
   name: string;
   system: string;
   updated: string;
+  /** Hidden from the lobby list (reversible). */
+  archived?: boolean;
 }
 
 /** Session token contents, signed by the API and checked when the WebSocket connects. */
