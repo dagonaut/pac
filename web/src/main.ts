@@ -139,6 +139,15 @@ function addLog(who: string, msg: LogMessage) {
   log.scrollTop = log.scrollHeight;
 }
 
+/** Local-only notice in the log (not sent to the table). */
+function note(text: string) {
+  const li = document.createElement('li');
+  li.className = 'note';
+  li.textContent = text;
+  log.append(li);
+  log.scrollTop = log.scrollHeight;
+}
+
 function sendLog(msg: LogMessage) {
   if (!session) return;
   session.send(msg);
@@ -213,8 +222,15 @@ camBtn.addEventListener('click', async () => {
   if (!session) return;
   camBtn.disabled = true;
   try {
-    await session.setCamera(cameraOn ? null : camSelect.value || null);
-    cameraOn = !cameraOn && !!camSelect.value;
+    if (!cameraOn && !camSelect.value) {
+      const err = await probeCamera();
+      note(err ? cameraError(err) : 'Camera found. Rejoin to use it (device list was empty when you joined).');
+      return;
+    }
+    await session.setCamera(cameraOn ? null : camSelect.value);
+    cameraOn = !cameraOn;
+  } catch (err) {
+    note(cameraError(err as Error));
   } finally {
     camBtn.disabled = false;
     renderControls();
@@ -233,18 +249,42 @@ $('#copy-link').addEventListener('click', async (e) => {
 // ---- Join / leave -------------------------------------------------------------------------
 
 /** Ask for mic (and camera) permission up front so device ids and labels are available. */
-async function getPermissions(wantCamera: boolean): Promise<{ camera: boolean }> {
+async function getPermissions(wantCamera: boolean): Promise<{ camera: boolean; cameraError?: Error }> {
   let stream: MediaStream;
-  let camera = wantCamera;
+  let cameraError: Error | undefined;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: wantCamera });
   } catch (e) {
     if (!wantCamera) throw e;
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true }); // camera blocked or missing
-    camera = false;
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true }); // mic is fine; the camera is the problem
+    cameraError = (await probeCamera()) ?? (e as Error);
   }
   stream.getTracks().forEach((t) => t.stop());
-  return { camera };
+  return { camera: wantCamera && !cameraError, cameraError };
+}
+
+/** Try the camera on its own; returns the error, or null if it opens. */
+async function probeCamera(): Promise<Error | null> {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ video: true });
+    s.getTracks().forEach((t) => t.stop());
+    return null;
+  } catch (e) {
+    return e as Error;
+  }
+}
+
+function cameraError(e: Error) {
+  switch (e.name) {
+    case 'NotAllowedError':
+      return 'Camera blocked. Allow it with the icon left of the address bar (and in Windows Settings → Privacy & security → Camera), then rejoin.';
+    case 'NotFoundError':
+      return 'No camera found. Check it is plugged in and enabled in your OS.';
+    case 'NotReadableError':
+      return 'Camera is busy. Close other apps using it (Teams, Zoom, Discord, OBS, another browser tab), then rejoin.';
+    default:
+      return `Camera problem (${e.name}: ${e.message}).`;
+  }
 }
 
 function pick(devices: MediaDeviceInfo[], kind: MediaDeviceKind, preferred: string) {
@@ -327,6 +367,7 @@ joinForm.addEventListener('submit', async (e) => {
     roomView.hidden = false;
     renderControls();
     await refreshDevices();
+    if (perms.cameraError) note(cameraError(perms.cameraError));
   } catch (err) {
     console.error(err);
     showError(`Something went wrong: ${(err as Error).message}`);

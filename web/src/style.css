@@ -262,3 +262,8 @@ header {
     height: 50vh;
   }
 }
+
+#log .note {
+  color: var(--muted-text);
+  font-style: italic;
+}
