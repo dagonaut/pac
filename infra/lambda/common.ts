@@ -19,11 +19,15 @@ export const STATE_SK = 'state';
 export const logSk = (seq: number) => `log#${String(seq).padStart(10, '0')}`;
 export const connSk = (connectionId: string) => `conn#${connectionId}`;
 
-let cachedKey: string | undefined;
+// Cached briefly so a rotated key takes effect within minutes, even in warm Lambdas.
+const KEY_TTL_MS = 5 * 60_000;
+let cachedKey: { value: string; at: number } | undefined;
 export async function tableKey(): Promise<string> {
-  cachedKey ??= (await secrets.send(new GetSecretValueCommand({ SecretId: process.env.TABLE_KEY_SECRET_ARN! })))
-    .SecretString!;
-  return cachedKey;
+  if (!cachedKey || Date.now() - cachedKey.at > KEY_TTL_MS) {
+    const value = (await secrets.send(new GetSecretValueCommand({ SecretId: process.env.TABLE_KEY_SECRET_ARN! }))).SecretString!;
+    cachedKey = { value, at: Date.now() };
+  }
+  return cachedKey.value;
 }
 
 function equal(a: string, b: string): boolean {
@@ -81,6 +85,9 @@ export function stateItem(state: RoomState) {
     data: JSON.stringify(state),
   };
 }
+
+/** DynamoDB items max out at 400 KB; refuse ops that would grow a room's state past this. */
+export const MAX_STATE_CHARS = 350_000;
 
 /** Names go into Chime's ExternalUserId, which only allows a limited character set. */
 export function cleanName(raw: unknown): string {

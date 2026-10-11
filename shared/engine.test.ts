@@ -57,8 +57,8 @@ test('scale and owner reverse even when they were unset', () => {
 
 test('publicNames only names face-up, unhidden cards', () => {
   const s = room();
-  apply(s, { kind: 'card.create', card: { id: 'c1', name: 'One', front: '/1' } });
-  apply(s, { kind: 'card.create', card: { id: 'c2', name: 'Two', front: '/2' } });
+  apply(s, { kind: 'card.create', card: { id: 'c1', name: 'One', front: '/assets/r/1.png' } });
+  apply(s, { kind: 'card.create', card: { id: 'c2', name: 'Two', front: '/assets/r/2.png' } });
   apply(s, { kind: 'piece.update', id: 'p1', set: { faceUp: true } });
   apply(s, { kind: 'piece.update', id: 'p2', set: { faceUp: true, visibleTo: 'gm' } });
   const op: Op = { kind: 'batch', ops: [
@@ -191,11 +191,11 @@ test('zone.update and field.set reverse (including unset slots)', () => {
 
 test('cards: create/update/delete reverse; cards in use cannot be deleted', () => {
   const s = room();
-  roundTrip(s, { kind: 'card.create', card: { id: 'cx', name: 'X', front: '/a/x.png' } });
-  apply(s, { kind: 'card.create', card: { id: 'cx', name: 'X', front: '/a/x.png' } });
-  roundTrip(s, { kind: 'card.update', id: 'cx', set: { upgraded: '/a/x2.png', back: '/a/b.png' } });
+  roundTrip(s, { kind: 'card.create', card: { id: 'cx', name: 'X', front: '/assets/r/x.png' } });
+  apply(s, { kind: 'card.create', card: { id: 'cx', name: 'X', front: '/assets/r/x.png' } });
+  roundTrip(s, { kind: 'card.update', id: 'cx', set: { upgraded: '/assets/r/x2.png', back: '/assets/r/b.png' } });
   roundTrip(s, { kind: 'card.delete', id: 'cx' });
-  apply(s, { kind: 'card.create', card: { id: 'c0', name: 'Zero', front: '/a/0.png' } });
+  apply(s, { kind: 'card.create', card: { id: 'c0', name: 'Zero', front: '/assets/r/0.png' } });
   assert.throws(() => apply(s, { kind: 'card.delete', id: 'c0' }), OpError); // p0 uses it
   assert.throws(() => apply(s, { kind: 'card.create', card: { id: 'cy', name: 'Y', front: '/y', evil: 1 } as never }), OpError);
 });
@@ -206,10 +206,37 @@ test('importing a batch of cards undoes completely', () => {
   const inv = apply(s, {
     kind: 'batch',
     ops: [
-      { kind: 'card.create', card: { id: 'k1', name: 'K1', front: '/k1' } },
+      { kind: 'card.create', card: { id: 'k1', name: 'K1', front: '/assets/r/k1.png' } },
       { kind: 'piece.create', piece: newPiece('q1', 'k1', 'deck') },
     ],
   })!;
   apply(s, inv);
   assert.deepEqual(s, before);
+});
+
+test('security: reserved ids and keys never reach Object.prototype', () => {
+  const s = room();
+  const attempts: Op[] = [
+    { kind: 'piece.update', id: '__proto__', set: { owner: 'Bob' } },
+    { kind: 'field.set', zone: '__proto__', key: 'x', value: 'y' },
+    { kind: 'field.set', zone: 'row', key: '__proto__', value: 'y' },
+    { kind: 'field.set', zone: 'row', key: '__proto__', value: null },
+    { kind: 'zone.update', id: 'constructor', set: { label: 'x' } },
+    { kind: 'card.update', id: '__proto__', set: { name: 'x' } },
+    { kind: 'piece.update', id: 'p0', set: { counters: JSON.parse('{"__proto__": 1}') } },
+    { kind: 'zone.create', zone: { id: '__proto__', kind: 'row', label: 'x' } },
+    { kind: 'stroke.delete', id: '__proto__' },
+  ];
+  for (const op of attempts) assert.throws(() => apply(structuredClone(s), op), OpError, JSON.stringify(op));
+  assert.equal(({} as Record<string, unknown>).owner, undefined);
+  assert.equal(({} as Record<string, unknown>).fields, undefined);
+});
+
+test('security: piece.create needs every field; zones only known keys; art only from this room', () => {
+  const s = room();
+  assert.throws(() => apply(s, { kind: 'piece.create', piece: { id: 'bad', def: 'c0', zone: 'board' } as never }), /missing/);
+  assert.throws(() => apply(s, { kind: 'zone.create', zone: { id: 'z', kind: 'row', label: 'Z', junk: 'x'.repeat(1000) } as never }), /Unknown zone field/);
+  for (const front of ['https://evil.example/x.png', '/assets/other-room/x.png', '/assets/r/../x.png', '/assets/r/x.svg']) {
+    assert.throws(() => apply(s, { kind: 'card.create', card: { id: 'cz', name: 'Z', front } }), /uploaded to this room/, front);
+  }
 });

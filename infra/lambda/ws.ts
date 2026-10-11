@@ -7,13 +7,13 @@ import {
   PostToConnectionCommand,
 } from '@aws-sdk/client-apigatewaymanagementapi';
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
-import { DeleteCommand, GetCommand, PutCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { APIGatewayProxyResultV2, APIGatewayProxyWebsocketEventV2 } from 'aws-lambda';
 import { apply, OpError, publicNames, resolve } from '../../shared/engine.ts';
 import type { LogEntry, Op, RoomState } from '../../shared/model.ts';
 import { CHUNK_CHARS, type ClientMessage, type ServerMessage } from '../../shared/protocol.ts';
-import { connSk, ddb, GAME_TABLE, loadState, logSk, roomPk, stateItem, verifySession } from './common.ts';
+import { connSk, ddb, GAME_TABLE, loadState, logSk, MAX_STATE_CHARS, roomPk, stateItem, verifySession } from './common.ts';
 
 const CONN_TTL_HOURS = 3; // API Gateway closes WebSockets after 2 hours anyway
 const LOG_IN_SNAPSHOT = 100;
@@ -120,9 +120,30 @@ async function commit(room: string, name: string, op: Op, cid: string): Promise<
     const undo = op.kind === 'undo' ? await findUndo(room, name) : undefined;
 
     const next: RoomState = structuredClone(current);
-    const resolved = resolve(next, op, { rand, undo: undo && (() => undo) });
-    const inverse = apply(next, resolved);
+    let resolved: Op;
+    let inverse: Op | null;
+    try {
+      resolved = resolve(next, op, { rand, undo: undo && (() => undo) });
+      inverse = apply(next, resolved);
+    } catch (e) {
+      // An undo whose reversal no longer fits the table (e.g. its zone was deleted) would block
+      // every later undo. Mark it done so the next Undo reaches the action before it.
+      if (undo && e instanceof OpError) {
+        await ddb.send(new UpdateCommand({
+          TableName: GAME_TABLE,
+          Key: { pk: roomPk(room), sk: logSk(undo.target) },
+          UpdateExpression: 'SET undone = :t',
+          ExpressionAttributeValues: { ':t': true },
+        }));
+        throw new OpError(`Your last action can't be undone anymore (${e.message}). Undo again for the one before it.`);
+      }
+      throw e;
+    }
     next.seq = current.seq + 1;
+    const item = stateItem(next);
+    if (item.data.length > MAX_STATE_CHARS) {
+      throw new OpError('This room is full. Clear some drawings or delete unused cards first.');
+    }
 
     const entry: LogEntry = { seq: next.seq, by: name, ts: new Date().toISOString(), op: resolved, cid, names: publicNames(next, resolved) };
     try {
@@ -132,7 +153,7 @@ async function commit(room: string, name: string, op: Op, cid: string): Promise<
             {
               Put: {
                 TableName: GAME_TABLE,
-                Item: stateItem(next),
+                Item: item,
                 ConditionExpression: 'seq = :seq',
                 ExpressionAttributeValues: { ':seq': current.seq },
               },
@@ -178,7 +199,7 @@ export async function handler(event: WsEvent): Promise<APIGatewayProxyResultV2> 
     const claims = await verifySession(event.queryStringParameters?.token);
     if (!claims) return { statusCode: 401 };
     const ttl = Math.floor(Date.now() / 1000) + CONN_TTL_HOURS * 3600;
-    await ddb.send(new PutCommand({ TableName: GAME_TABLE, Item: { pk: `conn#${connectionId}`, sk: 'conn', room: claims.room, name: claims.name, ttl } }));
+    await ddb.send(new PutCommand({ TableName: GAME_TABLE, Item: { pk: `conn#${connectionId}`, sk: 'conn', room: claims.room, name: claims.name, exp: claims.exp, ttl } }));
     await ddb.send(new PutCommand({ TableName: GAME_TABLE, Item: { pk: roomPk(claims.room), sk: connSk(connectionId), name: claims.name, ttl } }));
     return ok;
   }
@@ -189,8 +210,9 @@ export async function handler(event: WsEvent): Promise<APIGatewayProxyResultV2> 
   }
 
   const conn = (await ddb.send(new GetCommand({ TableName: GAME_TABLE, Key: { pk: `conn#${connectionId}`, sk: 'conn' } }))).Item;
-  if (!conn) {
-    await send(event, connectionId, { type: 'error', message: 'Session expired. Rejoin the room.' });
+  // Sockets can outlive their session token (they last up to 2 hours), so check expiry here too.
+  if (!conn || (typeof conn.exp === 'number' && conn.exp < Date.now() / 1000)) {
+    await send(event, connectionId, { type: 'error', message: 'Session expired. Leave and rejoin the room.' });
     return ok;
   }
   const room = conn.room as string;

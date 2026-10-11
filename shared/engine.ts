@@ -10,7 +10,10 @@ const MAX_BATCH = 200;
 const MAX_DRAW = 50;
 const MAX_FIELDS = 40;
 const MAX_STROKES = 1500;
-const MAX_STROKE_POINTS = 1000;
+const MAX_STROKE_POINTS = 500;
+const MAX_ZONES = 100;
+const MAX_CARDS = 2000;
+const MAX_PIECES = 3000;
 
 export class OpError extends Error {}
 
@@ -18,12 +21,28 @@ function fail(msg: string): never {
   throw new OpError(msg);
 }
 
-const isId = (v: unknown): v is string => typeof v === 'string' && /^[\w.:-]{1,64}$/.test(v);
+// Keys that would reach Object.prototype through obj[key]. Never valid as ids or names.
+const RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
+const isId = (v: unknown): v is string => typeof v === 'string' && /^[\w.:-]{1,64}$/.test(v) && !RESERVED.has(v);
 const isText = (v: unknown, max: number): v is string => typeof v === 'string' && v.length <= max;
+const isKey = (v: unknown, max: number): v is string => isText(v, max) && !!v.trim() && !RESERVED.has(v);
+
+/** rec[id] only if it's the record's own property (never something inherited like __proto__). */
+function own<T>(rec: Record<string, T> | undefined, id: unknown): T | undefined {
+  return rec && typeof id === 'string' && Object.hasOwn(rec, id) ? rec[id] : undefined;
+}
+
+/** Card art must be an image uploaded to this room (no outside URLs that could track players). */
+const isArt = (v: unknown, state: RoomState) =>
+  typeof v === 'string' && v.length <= 300 && v.startsWith(`/assets/${state.id}/`) && /^\/assets\/[a-z0-9-]+\/[\w-]+\.(png|jpg|webp|gif|avif)$/.test(v);
+
+const ZONE_KEYS = new Set(['id', 'kind', 'label', 'owner', 'slots', 'fields']);
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 function checkZone(z: Zone) {
-  if (!z || !isId(z.id)) fail('Zone needs an id.');
+  if (!z || typeof z !== 'object' || !isId(z.id)) fail('Zone needs an id.');
+  const extra = Object.keys(z).find((k) => !ZONE_KEYS.has(k));
+  if (extra) fail(`Unknown zone field ${extra}.`);
   if (!ZONE_KINDS.includes(z.kind)) fail(`Unknown zone kind "${z.kind}".`);
   if (!isText(z.label, 80)) fail('Zone label is too long.');
   if (z.owner !== undefined && !isText(z.owner, 40)) fail('Bad zone owner.');
@@ -39,18 +58,23 @@ function checkSlots(slots: unknown) {
 }
 
 function checkField(key: unknown, value: unknown) {
-  if (!isText(key, 40) || !key.trim()) fail('Field names are 1–40 characters.');
+  if (!isKey(key, 40)) fail('Field names are 1–40 characters.');
   if (!isText(value, 500)) fail('Field values are at most 500 characters.');
 }
 
-function checkCard(c: Partial<CardDef>, partial: boolean) {
+function checkCard(c: Partial<CardDef>, partial: boolean, state: RoomState) {
+  if (!c || typeof c !== 'object') fail('Bad card.');
   for (const k of ['name', 'front', 'back', 'upgraded'] as const) {
     const v = c[k];
     if (v === undefined) {
       if (!partial && (k === 'name' || k === 'front')) fail(`Card needs a ${k}.`);
       continue;
     }
-    if (!isText(v, k === 'name' ? 120 : 300)) fail(`Bad card ${k}.`);
+    if (k === 'name') {
+      if (!isText(v, 120)) fail('Bad card name.');
+    } else if (!(k !== 'front' && v === '') && !isArt(v, state)) {
+      fail(`Card ${k} must be an image uploaded to this room.`);
+    }
   }
   const extra = Object.keys(c).filter((k) => !['id', 'name', 'front', 'back', 'upgraded'].includes(k));
   if (extra.length) fail(`Unknown card field ${extra[0]}.`);
@@ -60,7 +84,7 @@ function checkPieceProps(set: Partial<PieceProps>, state: RoomState) {
   for (const [k, v] of Object.entries(set)) {
     const ok = (() => {
       switch (k) {
-        case 'zone': return isId(v) && !!state.zones[v];
+        case 'zone': return isId(v) && !!own(state.zones, v);
         case 'index': case 'x': case 'y': return isNum(v);
         case 'faceUp': case 'tapped': case 'upgraded': return typeof v === 'boolean';
         case 'note': return isText(v, 1000);
@@ -69,13 +93,16 @@ function checkPieceProps(set: Partial<PieceProps>, state: RoomState) {
         case 'scale': return isNum(v) && v >= 0.2 && v <= 20;
         case 'counters':
           return !!v && typeof v === 'object' && Object.keys(v).length <= 20 &&
-            Object.entries(v).every(([name, n]) => isText(name, 30) && isNum(n));
+            Object.entries(v).every(([name, n]) => isKey(name, 30) && isNum(n));
         default: return false;
       }
     })();
     if (!ok) fail(`Bad value for piece ${k}.`);
   }
 }
+
+/** Every field a piece must have, for piece.create. */
+const PIECE_REQUIRED: (keyof PieceProps)[] = ['zone', 'index', 'x', 'y', 'faceUp', 'tapped', 'upgraded', 'counters', 'note', 'visibleTo'];
 
 function nextIndex(state: RoomState, zone: string): number {
   let max = -1;
@@ -146,19 +173,20 @@ export function apply(state: RoomState, op: Op): Op | null {
 
     case 'zone.create':
       checkZone(op.zone);
-      if (state.zones[op.zone.id]) fail(`Zone ${op.zone.id} already exists.`);
+      if (Object.keys(state.zones).length >= MAX_ZONES) fail(`A room holds at most ${MAX_ZONES} zones.`);
+      if (own(state.zones, op.zone.id)) fail(`Zone ${op.zone.id} already exists.`);
       state.zones[op.zone.id] = { ...op.zone };
       return { kind: 'zone.delete', id: op.zone.id };
 
     case 'zone.delete': {
-      const zone = state.zones[op.id] ?? fail(`No zone ${op.id}.`);
+      const zone = own(state.zones, op.id) ?? fail(`No zone ${op.id}.`);
       if (Object.values(state.pieces).some((p) => p.zone === op.id)) fail(`Zone "${zone.label}" isn't empty.`);
       delete state.zones[op.id];
       return { kind: 'zone.create', zone };
     }
 
     case 'zone.update': {
-      const zone = state.zones[op.id] ?? fail(`No zone ${op.id}.`);
+      const zone = own(state.zones, op.id) ?? fail(`No zone ${op.id}.`);
       if (!op.set || typeof op.set !== 'object') fail('Nothing to update.');
       const keys = Object.keys(op.set);
       if (keys.some((k) => k !== 'label' && k !== 'slots')) fail('Only a zone label and slots can change.');
@@ -172,14 +200,15 @@ export function apply(state: RoomState, op: Op): Op | null {
     }
 
     case 'field.set': {
-      const zone = state.zones[op.zone] ?? fail(`No zone ${op.zone}.`);
+      const zone = own(state.zones, op.zone) ?? fail(`No zone ${op.zone}.`);
       if (op.value !== null) checkField(op.key, op.value);
-      else if (!isText(op.key, 40)) fail('Bad field name.');
+      else if (!isKey(op.key, 40)) fail('Bad field name.');
       const fields = (zone.fields ??= {});
-      const prev = op.key in fields ? fields[op.key] : null;
+      const has = Object.hasOwn(fields, op.key);
+      const prev = has ? fields[op.key] : null;
       if (op.value === null) delete fields[op.key];
       else {
-        if (!(op.key in fields) && Object.keys(fields).length >= MAX_FIELDS) fail('Too many fields.');
+        if (!has && Object.keys(fields).length >= MAX_FIELDS) fail('Too many fields.');
         fields[op.key] = op.value;
       }
       if (!Object.keys(fields).length) delete zone.fields;
@@ -189,16 +218,17 @@ export function apply(state: RoomState, op: Op): Op | null {
     case 'card.create': {
       const c = op.card;
       if (!c || !isId(c.id)) fail('Bad card.');
-      checkCard(c, false);
-      if (state.cards[c.id]) fail(`Card ${c.id} already exists.`);
+      checkCard(c, false, state);
+      if (Object.keys(state.cards).length >= MAX_CARDS) fail(`A room holds at most ${MAX_CARDS} cards.`);
+      if (own(state.cards, c.id)) fail(`Card ${c.id} already exists.`);
       state.cards[c.id] = { ...c };
       return { kind: 'card.delete', id: c.id };
     }
 
     case 'card.update': {
-      const c = state.cards[op.id] ?? fail(`No card ${op.id}.`);
+      const c = own(state.cards, op.id) ?? fail(`No card ${op.id}.`);
       if (!op.set || typeof op.set !== 'object' || 'id' in op.set) fail('Bad card update.');
-      checkCard(op.set, true);
+      checkCard(op.set, true, state);
       // '' means "no image" for back/upgraded (JSON drops undefined).
       const prev = Object.fromEntries(Object.keys(op.set).map((k) => [k, c[k as keyof CardDef] ?? '']));
       Object.assign(c, op.set);
@@ -208,7 +238,7 @@ export function apply(state: RoomState, op: Op): Op | null {
     }
 
     case 'card.delete': {
-      const c = state.cards[op.id] ?? fail(`No card ${op.id}.`);
+      const c = own(state.cards, op.id) ?? fail(`No card ${op.id}.`);
       if (Object.values(state.pieces).some((p) => p.def === op.id)) fail(`"${c.name}" is still on the table.`);
       delete state.cards[op.id];
       return { kind: 'card.create', card: c };
@@ -217,21 +247,24 @@ export function apply(state: RoomState, op: Op): Op | null {
     case 'piece.create': {
       const p = op.piece;
       if (!p || !isId(p.id) || !isId(p.def)) fail('Bad piece.');
-      if (state.pieces[p.id]) fail(`Piece ${p.id} already exists.`);
+      if (own(state.pieces, p.id)) fail(`Piece ${p.id} already exists.`);
       const { id: _id, def: _def, ...props } = p;
+      const missing = PIECE_REQUIRED.find((k) => props[k] === undefined);
+      if (missing) fail(`Piece is missing ${missing}.`);
       checkPieceProps(props, state);
+      if (Object.keys(state.pieces).length >= MAX_PIECES) fail(`A room holds at most ${MAX_PIECES} pieces.`);
       state.pieces[p.id] = structuredClone(p);
       return { kind: 'piece.delete', id: p.id };
     }
 
     case 'piece.delete': {
-      const p = state.pieces[op.id] ?? fail(`No piece ${op.id}.`);
+      const p = own(state.pieces, op.id) ?? fail(`No piece ${op.id}.`);
       delete state.pieces[op.id];
       return { kind: 'piece.create', piece: p };
     }
 
     case 'piece.update': {
-      const p = state.pieces[op.id] ?? fail(`No piece ${op.id}.`);
+      const p = own(state.pieces, op.id) ?? fail(`No piece ${op.id}.`);
       if (!op.set || typeof op.set !== 'object') fail('Nothing to update.');
       checkPieceProps(op.set, state);
       const set: Partial<PieceProps> = { ...op.set };
@@ -249,13 +282,13 @@ export function apply(state: RoomState, op: Op): Op | null {
     }
 
     case 'draw': {
-      const from = state.zones[op.from] ?? fail(`No zone ${op.from}.`);
-      const to = state.zones[op.to] ?? fail(`No zone ${op.to}.`);
+      const from = own(state.zones, op.from) ?? fail(`No zone ${op.from}.`);
+      const to = own(state.zones, op.to) ?? fail(`No zone ${op.to}.`);
       if (from.kind !== 'deck') fail(`"${from.label}" isn't a deck.`);
       if (!op.ids?.length) fail('Draw has no cards.');
       const undo: Op[] = [];
       for (const id of op.ids) {
-        const p = state.pieces[id];
+        const p = own(state.pieces, id);
         if (!p || p.zone !== op.from) fail('Drawn card is no longer in the deck.');
         undo.push({ kind: 'piece.update', id, set: { zone: p.zone, index: p.index, faceUp: p.faceUp } });
         Object.assign(p, { zone: op.to, index: nextIndex(state, op.to), faceUp: to.kind !== 'deck' });
@@ -267,7 +300,7 @@ export function apply(state: RoomState, op: Op): Op | null {
       const k = op.stroke;
       const strokes = (state.strokes ??= {});
       if (!k || !isId(k.id) || strokes[k.id]) fail('Bad or duplicate stroke.');
-      if (!state.zones[k.zone] || state.zones[k.zone].kind !== 'board') fail('Strokes go on a table.');
+      if (own(state.zones, k.zone)?.kind !== 'board') fail('Strokes go on a table.');
       if (typeof k.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(k.color)) fail('Bad stroke color.');
       if (!isNum(k.width) || k.width < 1 || k.width > 40) fail('Bad stroke width.');
       if (!isText(k.by, 40)) fail('Bad stroke author.');
@@ -280,7 +313,7 @@ export function apply(state: RoomState, op: Op): Op | null {
     }
 
     case 'stroke.delete': {
-      const k = state.strokes?.[op.id] ?? fail('That drawing is already gone.');
+      const k = own(state.strokes, op.id) ?? fail('That drawing is already gone.');
       delete state.strokes![op.id];
       return { kind: 'stroke.add', stroke: k };
     }
@@ -322,8 +355,8 @@ function touched(op: Op): string[] {
 export function publicNames(state: RoomState, op: Op): Record<string, string> | undefined {
   const names: Record<string, string> = {};
   for (const id of touched(op).slice(0, 50)) {
-    const p = state.pieces[id];
-    const card = p && state.cards[p.def];
+    const p = own(state.pieces, id);
+    const card = p && own(state.cards, p.def);
     if (card && p.faceUp && p.visibleTo === 'all') names[id] = card.name;
   }
   return Object.keys(names).length ? names : undefined;

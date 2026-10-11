@@ -163,12 +163,15 @@ export class VttStack extends Stack {
       defaultBehavior: {
         origin: S3BucketOrigin.withOriginAccessControl(site),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        // HSTS, nosniff, frame-options, referrer policy.
+        responseHeadersPolicy: cloudfront.ResponseHeadersPolicy.SECURITY_HEADERS,
       },
       additionalBehaviors: {
         '/assets/*': {
           origin: S3BucketOrigin.withOriginAccessControl(assets),
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+          responseHeadersPolicy: cloudfront.ResponseHeadersPolicy.SECURITY_HEADERS,
         },
         '/api/*': {
           origin: new HttpOrigin(Fn.select(2, Fn.split('/', api.apiEndpoint))),

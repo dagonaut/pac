@@ -41,11 +41,12 @@ const until = async (cond: () => boolean, what: string) => {
 const setup: Op[] = [
   { kind: 'zone.create', zone: { id: 'deck', kind: 'deck', label: 'Draw deck' } },
   { kind: 'zone.create', zone: { id: 'row', kind: 'row', label: 'Selection' } },
-  ...[0, 1, 2, 3].flatMap((i): Op[] => [
-    { kind: 'card.create', card: { id: `c${i}`, name: `Card ${i}`, front: `/assets/c${i}.png` } },
-    { kind: 'piece.create', piece: newPiece(`p${i}`, `c${i}`, 'deck', { index: i }) },
-  ]),
 ];
+// Card art must live under the room's own /assets/<room>/ path, so cards are added after creation.
+const cards = (room: string): Op[] => [0, 1, 2, 3].flatMap((i): Op[] => [
+  { kind: 'card.create', card: { id: `c${i}`, name: `Card ${i}`, front: `/assets/${room}/card-${i}.png` } },
+  { kind: 'piece.create', piece: newPiece(`p${i}`, `c${i}`, 'deck', { index: i }) },
+]);
 
 // The page's own scripts/styles must load (CloudFront routes some paths elsewhere, e.g. /assets/*).
 const html = await (await fetch(site)).text();
@@ -59,6 +60,7 @@ console.log('created room', room.id);
 assert.ok((await post('/api/rooms', {})).rooms.some((r: { id: string }) => r.id === room.id), 'room is listed');
 
 const ana = await player('Ana', room.id);
+await ana.game.send({ kind: 'batch', ops: cards(room.id) });
 const bo = await player('Bo', room.id);
 const start: RoomState = structuredClone(ana.game.state!);
 
