@@ -252,6 +252,20 @@ function pick(devices: MediaDeviceInfo[], kind: MediaDeviceKind, preferred: stri
   return (ofKind.find((d) => d.deviceId === preferred) ?? ofKind[0])?.deviceId;
 }
 
+/** getUserMedia failures look alike to players; say which one it was. */
+function micError(e: Error) {
+  switch (e.name) {
+    case 'NotAllowedError':
+      return 'Microphone blocked. Allow it with the icon left of the address bar (and check your OS privacy settings), then try again.';
+    case 'NotFoundError':
+      return 'No microphone found. Plug one in or check that your OS sees it.';
+    case 'NotReadableError':
+      return 'Your microphone is busy or blocked by the OS (another app using it, or OS privacy settings).';
+    default:
+      return `Couldn't open your microphone (${e.name}: ${e.message}).`;
+  }
+}
+
 function showError(msg: string) {
   joinError.textContent = msg;
   joinError.hidden = false;
@@ -267,8 +281,8 @@ joinForm.addEventListener('submit', async (e) => {
     const name = fields.name.value.trim();
     const key = fields.key.value;
 
-    const perms = await getPermissions(fields.camera.checked).catch(() => null);
-    if (!perms) return showError('Microphone access is needed to join. Check your browser permissions.');
+    const perms = await getPermissions(fields.camera.checked).catch((e: Error) => e);
+    if (perms instanceof Error) return showError(micError(perms));
 
     const res = await fetch('/api/join', {
       method: 'POST',
