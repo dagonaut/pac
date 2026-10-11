@@ -2,21 +2,51 @@
 
 A homebrew virtual tabletop for our online TTRPG group: live audio/video plus customizable, plugin-style game tools (dice, card-based sheets, shared images, maps).
 
-Early prototype. Current state: persistent rooms (one game system each) with A/V, a live game-state channel, server-side dice, chat, a GM seat and undo. Cards and the shared board come next.
+Prototype, usable at the table:
+- **Rooms** that persist between sessions, each tied to one game system. They can be archived from the lobby.
+- **Audio/video**: a strip of video tiles.
+- **Cards**: bulk-import card images. Decks with random server-side draws, face-up rows, discard piles. Drag cards anywhere. Flip, tap, upgrade (with optional upgraded art), counters, notes, and a GM seat that can hide cards. A card library for adding copies.
+- **Sheets**: one per player, with named card slots and fields such as HP.
+- **Table**: pan/zoom, optional grid, resizable pieces (images and maps work too), **live drawing**, and pings.
+- **Dice**: expressions like `2d6+3`, rolled on the server. Chat, a log of every action, and undo.
 
 ## Layout
 
-- `shared/`: the table model and engine, run by both the server and the browser. A room is **zones** (deck, row, board, slots, discard, hand) holding **pieces** (card instances, later tokens and images). Changes are small **ops**. The server resolves randomness (dice, draws), applies the op, and broadcasts it; every client applies the same op with the same `apply()`. Each op returns its inverse, which is how undo works.
-- `infra/`: AWS CDK app (TypeScript). CloudFront + S3 site; HTTP API (`lambda/api.ts`: rooms, join); WebSocket API (`lambda/ws.ts`: game state); DynamoDB; Secrets Manager.
+- `shared/`: the table model and engine, run by both the server and the browser. A room is **zones** (deck, row, board, slots, discard, hand) holding **pieces** (card instances, images, tokens), plus card definitions and drawing strokes. Changes are small **ops**. The server resolves randomness (dice, draws), applies the op, and broadcasts it; every client applies the same op with the same `apply()`. Each op returns its inverse, which is how undo works.
+- `infra/`: AWS CDK app (TypeScript). CloudFront + S3 site, plus card art at `/assets/*` from a separate bucket. HTTP API (`lambda/api.ts`: rooms, join, upload URLs). WebSocket API (`lambda/ws.ts`: game state; large messages are chunked to fit API Gateway's 32 KB frames). DynamoDB. Secrets Manager.
 - `web/`: Vite + vanilla TypeScript client.
   - `src/game.ts`: game-state client (snapshot, live ops, reconnect).
-  - `src/av.ts`: vendor-neutral A/V interface; `src/chime-av.ts` implements it with the Amazon Chime SDK.
-  - `src/systems/`: game systems (plugins). Each one is config on the generic engine: starting zones now, with sheet layout, custom actions and renderers to come.
-- `scripts/smoke.ts`: end-to-end check against a deployed stack.
+  - `src/board.ts`: the table. Zone bar, table surface, drag and drop, menus, library, preview. Also `pieces.ts` (card faces), `sheets.ts` (player sheets), `importer.ts` (bulk upload) and `draw.ts` (live drawing and pings).
+  - `src/av.ts`: vendor-neutral A/V interface; `src/chime-av.ts` implements it with the Amazon Chime SDK. Its data channel also carries unsaved live messages (in-progress strokes, pings).
+  - `src/systems/`: game systems (plugins). See below.
+- `scripts/smoke.ts`: end-to-end check against a deployed stack (API, WebSocket, uploads, a 150-card import).
+- `scripts/ui.ts`: two players in headless Chromium play through the whole UI.
+
+## Writing a game system
+
+A system is configuration on the generic engine. The server never knows which system a room uses. Copy `web/src/systems/example.ts`, change it, add it to the list in `web/src/systems/index.ts`, and deploy:
+
+```ts
+export const mygame: GameSystem = {
+  id: 'mygame',                       // stored in each room; don't change it later
+  name: 'My Game',
+  description: 'Shown in the system picker.',
+  setup: () => [                      // zones a new room starts with
+    { kind: 'zone.create', zone: { id: 'loot', kind: 'deck', label: 'Loot deck' } },
+    { kind: 'zone.create', zone: { id: 'market', kind: 'row', label: 'Market' } },
+    { kind: 'zone.create', zone: { id: 'table', kind: 'board', label: 'Table' } },
+  ],
+  sheet: { slots: ['Weapon', 'Armor', 'Gear'], fields: { HP: '10' } },  // "Create my sheet"
+};
+```
+
+Zone kinds: `deck` (hidden, random draws), `row` (face-up line), `board` (free placement), `slots` (named or free slots, used for sheets), `discard`, `hand`. Custom actions and renderers will be added to the contract when a game needs them.
 
 ## Data
 
-The `Game` DynamoDB table holds every room's state and action log. It has **point-in-time recovery** and is **retained** if the stack is deleted, so a `cdk destroy` doesn't wipe campaigns. Delete it by hand if you really mean it.
+The `Game` DynamoDB table holds every room's state and action log. It has **point-in-time recovery**. The table and the `Assets` bucket (card art) are both **retained** if the stack is deleted, so a `cdk destroy` doesn't wipe campaigns. Delete them by hand if you really mean it.
+
+Card art is served from unguessable URLs (`/assets/<room>/<uuid>.png`) without a login. Anyone with a link can view an image. Uploads need a session token.
 
 ## Deploy
 
@@ -37,4 +67,7 @@ Players join with a shared table key, stored in Secrets Manager as `pac-vtt/tabl
 VTT_SITE_URL=https://<your-cloudfront-domain> npm run dev   # UI on localhost, /api proxied to the deployed stack
 npm test                                                     # engine unit tests
 PAC_KEY=<table key> npx tsx scripts/smoke.ts                 # two simulated players against the live site
+PAC_KEY=<table key> npx tsx scripts/ui.ts [site] [image]     # headless browser test (needs Playwright's Chromium)
 ```
+
+`images/` is gitignored: keep card art there for local testing, not in this public repo.
