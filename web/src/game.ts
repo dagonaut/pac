@@ -70,6 +70,9 @@ export class GameClient {
       this.pending.clear();
       if (this.closed) return;
       // API Gateway closes sockets after 2 hours, and networks blip: reconnect with backoff.
+      // A socket that never opens (rather than one that drops) usually means the session
+      // expired (tokens last 12 hours). Say so instead of retrying silently forever.
+      if (this.retry === 8) this.events.error('Still cannot reconnect. If this keeps up, leave and rejoin the room.');
       const delay = Math.min(10_000, 500 * 2 ** this.retry++);
       setTimeout(() => !this.closed && this.connect(), delay);
     };

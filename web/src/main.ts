@@ -156,7 +156,17 @@ whoForm.addEventListener('submit', (e) => {
 });
 
 const systemSelect = newRoomForm.elements.namedItem('system') as HTMLSelectElement;
-systemSelect.replaceChildren(...systems.map((s) => new Option(`${s.name} (${s.description})`, s.id)));
+systemSelect.replaceChildren(...systems.map((s) => {
+  const o = new Option(s.name, s.id);
+  o.title = s.description;
+  return o;
+}));
+const systemHint = document.createElement('small');
+systemHint.className = 'muted';
+const showHint = () => (systemHint.textContent = systems.find((s) => s.id === systemSelect.value)?.description ?? '');
+systemSelect.addEventListener('change', showHint);
+systemSelect.parentElement!.append(systemHint);
+showHint();
 
 newRoomForm.addEventListener('submit', async (e) => {
   e.preventDefault();

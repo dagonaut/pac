@@ -74,6 +74,14 @@ button.danger {
 
 #rooms {
   width: min(460px, 100%);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+#new-room select,
+#new-room input {
+  width: 100%;
+  min-width: 0;
+  text-overflow: ellipsis;
 }
 
 .card h2,
@@ -111,7 +119,7 @@ button.danger {
 }
 
 #room-list .archive-btn,
-.archived-toggle {
+#room-list .archived-toggle {
   background: none;
   font-size: 0.8rem;
   padding: 2px 8px;
