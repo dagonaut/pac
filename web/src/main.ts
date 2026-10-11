@@ -277,6 +277,7 @@ const board = createBoard($('#board'), {
   note,
   openImport: createImporter({ token: () => token, state: () => game?.state ?? null, act }),
   upload: (file) => uploadImage(token, file),
+  live: (data) => session?.send(data),
 });
 
 $('#dice').addEventListener('click', (e) => {
@@ -430,7 +431,7 @@ async function enterRoom(id: string, button: HTMLButtonElement) {
       roster: renderRoster,
       tileUpdated: renderTile,
       tileRemoved: removeTile,
-      message: () => {}, // unused for now; game actions go over the game channel
+      message: (from, data) => board.onLive(from, data), // live drawing + pings (unsaved)
       ended: leftRoom,
     }, {
       micId: pick(devices, 'audioinput', prefs.get('mic')),

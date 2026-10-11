@@ -45,7 +45,10 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
       return `changed ${card(op.id)}`;
     }
     case 'draw': return `drew ${op.count} from ${zone(op.from)} to ${zone(op.to)}`;
+    case 'stroke.add': return 'drew on the table';
+    case 'stroke.delete': return 'erased a drawing';
     case 'batch': {
+      if (op.ops.length && op.ops.every((o) => o.kind === 'stroke.delete')) return `cleared ${op.ops.length} drawing${op.ops.length === 1 ? '' : 's'}`;
       const imported = op.ops.filter((o) => o.kind === 'card.create').length;
       if (imported) return `imported ${imported} card${imported === 1 ? '' : 's'}`;
       return `moved ${op.ops.length} cards`;

@@ -24,7 +24,7 @@ async function player(name: string, url = site) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ['camera', 'microphone'] });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log(`[${name}] page error:`, e.message));
-  page.on('console', (m) => m.type() === 'error' && console.log(`[${name}] console:`, m.text()));
+  page.on('console', (m) => (m.type() === 'error' || process.env.DEBUG) && console.log(`[${name}] console ${m.type()}:`, m.text()));
   await page.goto(url);
   await page.fill('#who input[name=name]', name);
   await page.fill('#who input[name=key]', key);
@@ -134,6 +134,38 @@ await shot(ana, '05b-library-copy-bigger');
 await bo.click('.dock-tab:text("Ana")');
 await bo.waitForSelector('.sheet .slot[data-slot="0"] .piece');
 await shot(bo, '06-bo-sees-ana-sheet');
+
+// ---- Drawing: Bo sees the line while Ana is still drawing, then the saved stroke ---------------
+await ana.click('.draw-tools .tool[data-tool=pen]');
+const t = (await ana.locator('.table-wrap').boundingBox())!;
+const midY = t.y + t.height * 0.6;
+await ana.mouse.move(t.x + 160, midY);
+await ana.mouse.down();
+for (let i = 1; i <= 15; i++) await ana.mouse.move(t.x + 160 + i * 20, midY + Math.sin(i / 2) * 30);
+await bo.waitForSelector('svg.ink path:not([data-stroke])', { state: 'attached', timeout: 10000 }); // live, unsaved
+await ana.mouse.up();
+await bo.waitForSelector('svg.ink path[data-stroke]', { state: 'attached' });
+assert.equal(await bo.locator('svg.ink path').count(), 1, 'live path replaced by the saved one');
+await shot(bo, '07-bo-sees-drawing');
+
+// Ping shows up for Bo.
+await ana.keyboard.press('p');
+await ana.mouse.click(t.x + 600, t.y + t.height * 0.4);
+await bo.waitForSelector('.ping', { state: 'attached', timeout: 10000 });
+
+// Erase it, then undo brings it back.
+await ana.keyboard.press('e');
+const stroke = ana.locator('svg.ink path[data-stroke]');
+const sb = (await stroke.boundingBox())!;
+// Erase by sweeping across the line.
+await ana.mouse.move(sb.x + sb.width / 2, sb.y - 5);
+await ana.mouse.down();
+await ana.mouse.move(sb.x + sb.width / 2, sb.y + sb.height + 5, { steps: 20 });
+await ana.mouse.up();
+await bo.waitForFunction(() => !document.querySelector('svg.ink path[data-stroke]'));
+await ana.keyboard.press('Escape');
+await ana.keyboard.press('Control+z');
+await bo.waitForSelector('svg.ink path[data-stroke]', { state: 'attached' });
 
 // Dice + chat still work.
 await bo.fill('#roll-form input', '2d6+1');

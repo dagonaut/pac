@@ -9,6 +9,8 @@ const VISIBILITY: Visibility[] = ['all', 'gm', 'owner'];
 const MAX_BATCH = 200;
 const MAX_DRAW = 50;
 const MAX_FIELDS = 40;
+const MAX_STROKES = 1500;
+const MAX_STROKE_POINTS = 1000;
 
 export class OpError extends Error {}
 
@@ -259,6 +261,28 @@ export function apply(state: RoomState, op: Op): Op | null {
         Object.assign(p, { zone: op.to, index: nextIndex(state, op.to), faceUp: to.kind !== 'deck' });
       }
       return { kind: 'batch', ops: undo.reverse() };
+    }
+
+    case 'stroke.add': {
+      const k = op.stroke;
+      const strokes = (state.strokes ??= {});
+      if (!k || !isId(k.id) || strokes[k.id]) fail('Bad or duplicate stroke.');
+      if (!state.zones[k.zone] || state.zones[k.zone].kind !== 'board') fail('Strokes go on a table.');
+      if (typeof k.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(k.color)) fail('Bad stroke color.');
+      if (!isNum(k.width) || k.width < 1 || k.width > 40) fail('Bad stroke width.');
+      if (!isText(k.by, 40)) fail('Bad stroke author.');
+      const pts = k.points;
+      if (!Array.isArray(pts) || pts.length < 2 || pts.length % 2 || pts.length > MAX_STROKE_POINTS * 2) fail('Bad stroke points.');
+      if (!pts.every((v) => Number.isInteger(v) && v > -5000 && v < 20000)) fail('Bad stroke points.');
+      if (Object.keys(strokes).length >= MAX_STROKES) fail('The table is full of drawings; clear some first.');
+      strokes[k.id] = { id: k.id, zone: k.zone, color: k.color, width: k.width, points: [...pts], by: k.by };
+      return { kind: 'stroke.delete', id: k.id };
+    }
+
+    case 'stroke.delete': {
+      const k = state.strokes?.[op.id] ?? fail('That drawing is already gone.');
+      delete state.strokes![op.id];
+      return { kind: 'stroke.add', stroke: k };
     }
 
     case 'batch': {

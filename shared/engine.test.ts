@@ -68,6 +68,29 @@ test('publicNames only names face-up, unhidden cards', () => {
   assert.deepEqual(publicNames(s, op), { p1: 'One' });
 });
 
+test('strokes: add/delete reverse; clear-all as a batch undoes', () => {
+  const s = room();
+  const stroke = { id: 'k1', zone: 'board', color: '#ff0000', width: 3, points: [0, 0, 10, 10, 20, 5], by: 'Ana' };
+  roundTrip(s, { kind: 'stroke.add', stroke });
+  apply(s, { kind: 'stroke.add', stroke });
+  apply(s, { kind: 'stroke.add', stroke: { ...stroke, id: 'k2' } });
+  roundTrip(s, { kind: 'batch', ops: [{ kind: 'stroke.delete', id: 'k1' }, { kind: 'stroke.delete', id: 'k2' }] });
+  for (const bad of [
+    { ...stroke, id: 'k3', zone: 'row' },
+    { ...stroke, id: 'k3', color: 'red' },
+    { ...stroke, id: 'k3', points: [1, 2, 3] },
+    { ...stroke, id: 'k3', points: [0.5, 1] },
+    { ...stroke, id: 'k1' },
+  ]) assert.throws(() => apply(s, { kind: 'stroke.add', stroke: bad }), OpError, JSON.stringify(bad));
+});
+
+test('rooms from before drawing existed accept strokes', () => {
+  const s = room();
+  delete s.strokes;
+  apply(s, { kind: 'stroke.add', stroke: { id: 'k1', zone: 'board', color: '#00ff00', width: 2, points: [1, 1], by: 'Bo' } });
+  assert.equal(Object.keys(s.strokes!).length, 1);
+});
+
 test('moving to a zone without an index appends', () => {
   const s = room();
   apply(s, { kind: 'piece.update', id: 'p0', set: { zone: 'row' } });

@@ -50,6 +50,17 @@ export interface Piece {
 /** Fields a piece.update may change (everything except identity). */
 export type PieceProps = Omit<Piece, 'id' | 'def'>;
 
+/** A freehand line drawn on a board zone, in table coordinates. */
+export interface Stroke {
+  id: string;
+  zone: string;
+  color: string;
+  width: number;
+  /** Flattened [x0, y0, x1, y1, ...], whole pixels. */
+  points: number[];
+  by: string;
+}
+
 export interface RoomState {
   id: string;
   name: string;
@@ -61,6 +72,8 @@ export interface RoomState {
   zones: Record<string, Zone>;
   pieces: Record<string, Piece>;
   cards: Record<string, CardDef>;
+  /** Drawings on the table. Optional: rooms created before drawing existed don't have it. */
+  strokes?: Record<string, Stroke>;
 }
 
 export interface DiceTerm {
@@ -93,6 +106,8 @@ export type Op =
   | { kind: 'piece.update'; id: string; set: Partial<PieceProps> }
   /** Draw `count` random pieces from a deck; the server fills in `ids`. */
   | { kind: 'draw'; from: string; to: string; count: number; ids?: string[] }
+  | { kind: 'stroke.add'; stroke: Stroke }
+  | { kind: 'stroke.delete'; id: string }
   | { kind: 'batch'; ops: Op[] }
   /** Client sends `{kind:'undo'}`; the server fills in which entry and the op that reverses it. */
   | { kind: 'undo'; target?: number; op?: Op };
@@ -109,5 +124,5 @@ export interface LogEntry {
 }
 
 export function emptyRoom(id: string, name: string, system: string): RoomState {
-  return { id, name, system, created: new Date().toISOString(), seq: 0, gm: null, zones: {}, pieces: {}, cards: {} };
+  return { id, name, system, created: new Date().toISOString(), seq: 0, gm: null, zones: {}, pieces: {}, cards: {}, strokes: {} };
 }

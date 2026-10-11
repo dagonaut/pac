@@ -4,6 +4,7 @@
 import { newPiece } from '../../shared/engine.ts';
 import type { Op, Piece, PieceProps, RoomState, Zone, ZoneKind } from '../../shared/model.ts';
 import { h, shortId } from './dom';
+import { createDrawing } from './draw';
 import { cardName, faceOf, pieceEl, prunePieceEls } from './pieces';
 import { renderDock } from './sheets';
 
@@ -15,6 +16,8 @@ export interface TableCtx {
   openImport(zoneId?: string): void;
   /** Upload an image; resolves to its /assets/... path. */
   upload(file: File): Promise<string>;
+  /** Unsaved real-time message to everyone else (live drawing, pings). */
+  live(data: unknown): void;
 }
 
 const TABLE_W = 3200;
@@ -56,7 +59,8 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
   const dock = h('div.sheet-dock');
   const preview = h('div.preview', { hidden: true });
   const menu = h('div.menu', { hidden: true });
-  root.replaceChildren(bar, h('div.table-area', {}, wrap, hint, zoomBox), dock, preview);
+  const area = h('div.table-area', {}, wrap, hint, zoomBox);
+  root.replaceChildren(bar, area, dock, preview);
   document.body.append(menu);
 
   let zoom = Number(localStorage.getItem('vtt.zoom')) || 1;
@@ -75,6 +79,15 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     e.preventDefault();
     setZoom(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
   }, { passive: false });
+
+  const drawing = createDrawing(surface, area, {
+    me: () => ctx.me(),
+    state: () => ctx.state(),
+    act: ctx.act,
+    live: ctx.live,
+    zoom: () => zoom,
+    tableZone: () => surface.dataset.zone,
+  });
 
   const st = () => ctx.state()!;
   const me = () => ctx.me();
@@ -612,6 +625,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     } else {
       delete surface.dataset.zone;
     }
+    drawing.render(state);
 
     renderDock(dock, state, {
       me: me(),
@@ -632,5 +646,5 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     if (previewFor && !state.pieces[previewFor]) hidePreview();
   }
 
-  return { render };
+  return { render, onLive: drawing.onLive };
 }

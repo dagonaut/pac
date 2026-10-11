@@ -1000,3 +1000,108 @@ dialog.modal label {
   padding: 2px 8px;
   justify-self: start;
 }
+
+/* ---- Drawing ---- */
+
+svg.ink {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 10000000;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.table-surface[data-tool='erase'] svg.ink path[data-stroke] {
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.table-surface[data-tool='pen'],
+.table-surface[data-tool='pen'] .piece {
+  cursor: crosshair;
+}
+
+.table-surface[data-tool='ping'],
+.table-surface[data-tool='ping'] .piece {
+  cursor: cell;
+}
+
+.draw-tools {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 3px 5px;
+  z-index: 5;
+}
+
+.draw-tools .tool {
+  padding: 1px 7px;
+  background: none;
+}
+
+.draw-tools .tool.active {
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+
+.draw-tools select {
+  padding: 1px 4px;
+  font-size: 0.8rem;
+}
+
+.swatches {
+  display: flex;
+  gap: 3px;
+  margin: 0 4px;
+}
+
+.swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #4a3f31;
+}
+
+.swatch.active {
+  border-color: var(--text);
+}
+
+.ping {
+  position: absolute;
+  width: 0;
+  height: 0;
+  z-index: 10000001;
+  pointer-events: none;
+  border: 3px solid;
+  border-radius: 50%;
+  animation: ping 2.5s ease-out forwards;
+}
+
+.ping span {
+  position: absolute;
+  left: 50%;
+  top: -28px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: #000c;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+@keyframes ping {
+  0% { width: 0; height: 0; margin: 0; opacity: 1; }
+  30% { width: 60px; height: 60px; margin: -30px; opacity: 1; }
+  100% { width: 120px; height: 120px; margin: -60px; opacity: 0; }
+}
