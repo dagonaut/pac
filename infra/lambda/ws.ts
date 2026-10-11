@@ -8,11 +8,11 @@ import {
 } from '@aws-sdk/client-apigatewaymanagementapi';
 import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import type { APIGatewayProxyResultV2, APIGatewayProxyWebsocketEventV2 } from 'aws-lambda';
 import { apply, OpError, resolve } from '../../shared/engine.ts';
 import type { LogEntry, Op, RoomState } from '../../shared/model.ts';
-import type { ClientMessage, ServerMessage } from '../../shared/protocol.ts';
+import { CHUNK_CHARS, type ClientMessage, type ServerMessage } from '../../shared/protocol.ts';
 import { connSk, ddb, GAME_TABLE, loadState, logSk, roomPk, stateItem, verifySession } from './common.ts';
 
 const CONN_TTL_HOURS = 3; // API Gateway closes WebSockets after 2 hours anyway
@@ -29,9 +29,21 @@ function client(event: WsEvent) {
   return mgmt;
 }
 
+/** Split a message into frames that fit API Gateway's 128 KB limit. */
+function frames(msg: ServerMessage): string[] {
+  const json = JSON.stringify(msg);
+  if (json.length <= CHUNK_CHARS) return [json];
+  const id = randomUUID();
+  const n = Math.ceil(json.length / CHUNK_CHARS);
+  return Array.from({ length: n }, (_, i) =>
+    JSON.stringify({ type: 'chunk', id, i, n, data: json.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS) } satisfies ServerMessage));
+}
+
 async function send(event: WsEvent, connectionId: string, msg: ServerMessage): Promise<boolean> {
   try {
-    await client(event).send(new PostToConnectionCommand({ ConnectionId: connectionId, Data: JSON.stringify(msg) }));
+    for (const data of frames(msg)) {
+      await client(event).send(new PostToConnectionCommand({ ConnectionId: connectionId, Data: data }));
+    }
     return true;
   } catch (e) {
     if (e instanceof GoneException) return false;

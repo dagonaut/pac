@@ -2,6 +2,8 @@
 //   POST /api/rooms        { key }                         -> { rooms }
 //   POST /api/rooms/create { key, name, system, setup }    -> { room }
 //   POST /api/join         { key, room, name }             -> { meeting, attendee, token, wsUrl, name, room }
+// and, gated by the session token from /api/join instead:
+//   POST /api/assets       { token, files: [{name, type, size}] } -> { uploads: [{url, fields, path}] }
 import {
   ChimeSDKMeetingsClient,
   CreateAttendeeCommand,
@@ -11,6 +13,8 @@ import {
   type Meeting,
 } from '@aws-sdk/client-chime-sdk-meetings';
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
+import { S3Client } from '@aws-sdk/client-s3';
+import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { GetCommand, PutCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
@@ -18,7 +22,7 @@ import { apply, OpError, resolve } from '../../shared/engine.ts';
 import { emptyRoom, type Op } from '../../shared/model.ts';
 import type { RoomSummary } from '../../shared/protocol.ts';
 import {
-  cleanName, ddb, GAME_TABLE, json, keyMatches, loadState, signSession, STATE_SK, stateItem,
+  cleanName, ddb, GAME_TABLE, json, keyMatches, loadState, signSession, STATE_SK, stateItem, verifySession,
 } from './common.ts';
 
 // Chime's meeting API lives in a "control" region; the media itself runs in MEDIA_REGION.
@@ -27,6 +31,15 @@ const MEETINGS_TABLE = process.env.ROOMS_TABLE!;
 const MEDIA_REGION = process.env.CHIME_MEDIA_REGION!;
 const WS_URL = process.env.WS_URL!;
 const SESSION_HOURS = 12;
+const ASSETS_BUCKET = process.env.ASSETS_BUCKET!;
+const s3 = new S3Client({});
+
+// Raster images only: SVG can carry scripts and assets are served from our own origin.
+const IMAGE_TYPES: Record<string, string> = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif',
+};
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_FILES = 200;
 
 class HttpError extends Error {
   constructor(readonly status: number, message: string) {
@@ -164,6 +177,33 @@ async function join(body: Record<string, unknown>) {
   };
 }
 
+/** Presigned S3 POSTs for card art. Files land under assets/<room>/ with random names. */
+async function uploadUrls(body: Record<string, unknown>) {
+  const claims = await verifySession(String(body.token ?? ''));
+  if (!claims) throw new HttpError(401, 'Session expired. Rejoin the room.');
+  const files = Array.isArray(body.files) ? body.files : [];
+  if (!files.length || files.length > MAX_FILES) throw new HttpError(400, `Upload 1–${MAX_FILES} images at a time.`);
+
+  const uploads = await Promise.all(
+    files.map(async (f: { name?: unknown; type?: unknown; size?: unknown }) => {
+      const type = String(f.type ?? '');
+      const ext = IMAGE_TYPES[type];
+      if (!ext) throw new HttpError(400, `"${String(f.name)}" isn't a PNG, JPEG, WebP, GIF or AVIF image.`);
+      if (Number(f.size) > MAX_IMAGE_BYTES) throw new HttpError(400, `"${String(f.name)}" is over 8 MB.`);
+      const key = `assets/${claims.room}/${randomUUID()}.${ext}`;
+      const { url, fields } = await createPresignedPost(s3, {
+        Bucket: ASSETS_BUCKET,
+        Key: key,
+        Conditions: [['content-length-range', 1, MAX_IMAGE_BYTES], ['eq', '$Content-Type', type]],
+        Fields: { 'Content-Type': type, 'Cache-Control': 'public, max-age=31536000, immutable' },
+        Expires: 600,
+      });
+      return { url, fields, path: `/${key}` };
+    }),
+  );
+  return { uploads };
+}
+
 export async function handler(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   let body: Record<string, unknown>;
   try {
@@ -174,6 +214,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
   }
 
   try {
+    if (event.routeKey === 'POST /api/assets') return json(200, await uploadUrls(body));
     if (!(await keyMatches(body.key))) return json(403, { error: 'Wrong table key.' });
     switch (event.routeKey) {
       case 'POST /api/rooms': return json(200, await listRooms());

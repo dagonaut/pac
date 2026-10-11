@@ -5,3 +5,5 @@ cdk.out/
 .env*
 # Route 53 lookups are cached here keyed by account id; keep them out of the public repo
 cdk.context.json
+# Card art and other game assets (the repo is public)
+images/

@@ -2,12 +2,13 @@
 // copy, then broadcasts the resolved op; every browser runs the same apply(), so all copies of the
 // state stay identical. apply() returns the op that reverses it (for undo), or null.
 import { roll } from './dice.ts';
-import type { Op, Piece, PieceProps, RoomState, Visibility, Zone, ZoneKind } from './model.ts';
+import type { CardDef, Op, Piece, PieceProps, RoomState, Visibility, Zone, ZoneKind } from './model.ts';
 
 const ZONE_KINDS: ZoneKind[] = ['deck', 'row', 'board', 'slots', 'discard', 'hand'];
 const VISIBILITY: Visibility[] = ['all', 'gm', 'owner'];
 const MAX_BATCH = 200;
 const MAX_DRAW = 50;
+const MAX_FIELDS = 40;
 
 export class OpError extends Error {}
 
@@ -24,6 +25,33 @@ function checkZone(z: Zone) {
   if (!ZONE_KINDS.includes(z.kind)) fail(`Unknown zone kind "${z.kind}".`);
   if (!isText(z.label, 80)) fail('Zone label is too long.');
   if (z.owner !== undefined && !isText(z.owner, 40)) fail('Bad zone owner.');
+  if (z.slots !== undefined) checkSlots(z.slots);
+  if (z.fields !== undefined) {
+    if (!z.fields || typeof z.fields !== 'object' || Object.keys(z.fields).length > MAX_FIELDS) fail('Too many fields.');
+    for (const [k, v] of Object.entries(z.fields)) checkField(k, v);
+  }
+}
+
+function checkSlots(slots: unknown) {
+  if (!Array.isArray(slots) || slots.length > 50 || !slots.every((l) => isText(l, 40))) fail('Bad slot labels.');
+}
+
+function checkField(key: unknown, value: unknown) {
+  if (!isText(key, 40) || !key.trim()) fail('Field names are 1–40 characters.');
+  if (!isText(value, 500)) fail('Field values are at most 500 characters.');
+}
+
+function checkCard(c: Partial<CardDef>, partial: boolean) {
+  for (const k of ['name', 'front', 'back', 'upgraded'] as const) {
+    const v = c[k];
+    if (v === undefined) {
+      if (!partial && (k === 'name' || k === 'front')) fail(`Card needs a ${k}.`);
+      continue;
+    }
+    if (!isText(v, k === 'name' ? 120 : 300)) fail(`Bad card ${k}.`);
+  }
+  const extra = Object.keys(c).filter((k) => !['id', 'name', 'front', 'back', 'upgraded'].includes(k));
+  if (extra.length) fail(`Unknown card field ${extra[0]}.`);
 }
 
 function checkPieceProps(set: Partial<PieceProps>, state: RoomState) {
@@ -126,15 +154,61 @@ export function apply(state: RoomState, op: Op): Op | null {
       return { kind: 'zone.create', zone };
     }
 
+    case 'zone.update': {
+      const zone = state.zones[op.id] ?? fail(`No zone ${op.id}.`);
+      if (!op.set || typeof op.set !== 'object') fail('Nothing to update.');
+      const keys = Object.keys(op.set);
+      if (keys.some((k) => k !== 'label' && k !== 'slots')) fail('Only a zone label and slots can change.');
+      if (op.set.label !== undefined && (!isText(op.set.label, 80) || !op.set.label.trim())) fail('Bad zone label.');
+      if (op.set.slots !== undefined) checkSlots(op.set.slots);
+      // Inverses travel as JSON, which drops undefined, so "no slots" is written as [].
+      const prev = Object.fromEntries(keys.map((k) => [k, structuredClone(k === 'slots' ? zone.slots ?? [] : zone.label)]));
+      Object.assign(zone, structuredClone(op.set));
+      if (!zone.slots?.length) delete zone.slots;
+      return { kind: 'zone.update', id: op.id, set: prev };
+    }
+
+    case 'field.set': {
+      const zone = state.zones[op.zone] ?? fail(`No zone ${op.zone}.`);
+      if (op.value !== null) checkField(op.key, op.value);
+      else if (!isText(op.key, 40)) fail('Bad field name.');
+      const fields = (zone.fields ??= {});
+      const prev = op.key in fields ? fields[op.key] : null;
+      if (op.value === null) delete fields[op.key];
+      else {
+        if (!(op.key in fields) && Object.keys(fields).length >= MAX_FIELDS) fail('Too many fields.');
+        fields[op.key] = op.value;
+      }
+      if (!Object.keys(fields).length) delete zone.fields;
+      return { kind: 'field.set', zone: op.zone, key: op.key, value: prev };
+    }
+
     case 'card.create': {
       const c = op.card;
-      if (!c || !isId(c.id) || !isText(c.name, 120) || !isText(c.front, 300)) fail('Bad card.');
-      if ((c.back !== undefined && !isText(c.back, 300)) || (c.upgraded !== undefined && !isText(c.upgraded, 300))) {
-        fail('Bad card image.');
-      }
+      if (!c || !isId(c.id)) fail('Bad card.');
+      checkCard(c, false);
       if (state.cards[c.id]) fail(`Card ${c.id} already exists.`);
       state.cards[c.id] = { ...c };
-      return null; // card art stays in the library; delete pieces instead
+      return { kind: 'card.delete', id: c.id };
+    }
+
+    case 'card.update': {
+      const c = state.cards[op.id] ?? fail(`No card ${op.id}.`);
+      if (!op.set || typeof op.set !== 'object' || 'id' in op.set) fail('Bad card update.');
+      checkCard(op.set, true);
+      // '' means "no image" for back/upgraded (JSON drops undefined).
+      const prev = Object.fromEntries(Object.keys(op.set).map((k) => [k, c[k as keyof CardDef] ?? '']));
+      Object.assign(c, op.set);
+      for (const k of ['back', 'upgraded'] as const) if (!c[k]) delete c[k];
+      if (!c.name || !c.front) fail('A card needs a name and a front image.');
+      return { kind: 'card.update', id: op.id, set: prev };
+    }
+
+    case 'card.delete': {
+      const c = state.cards[op.id] ?? fail(`No card ${op.id}.`);
+      if (Object.values(state.pieces).some((p) => p.def === op.id)) fail(`"${c.name}" is still on the table.`);
+      delete state.cards[op.id];
+      return { kind: 'card.create', card: c };
     }
 
     case 'piece.create': {

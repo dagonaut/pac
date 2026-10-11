@@ -2,7 +2,7 @@
 // server by applying the ops it broadcasts, with the same engine the server uses.
 import { apply } from '../../shared/engine.ts';
 import type { LogEntry, Op, RoomState } from '../../shared/model.ts';
-import type { ClientMessage, ServerMessage } from '../../shared/protocol.ts';
+import { type ClientMessage, MAX_CLIENT_MESSAGE, type ServerMessage } from '../../shared/protocol.ts';
 
 export interface GameEvents {
   /** Fresh full state (first connect, reconnect, or after a gap). Re-render everything. */
@@ -25,6 +25,7 @@ export class GameClient {
   private ping: ReturnType<typeof setInterval> | undefined;
   private buffered: LogEntry[] = [];
   private pending = new Map<string, { resolve(e: LogEntry): void; reject(err: Error): void }>();
+  private chunks = new Map<string, string[]>();
 
   constructor(private url: string, private token: string, private events: GameEvents) {
     this.connect();
@@ -35,8 +36,10 @@ export class GameClient {
     const cid = crypto.randomUUID();
     return new Promise((resolve, reject) => {
       if (this.ws?.readyState !== WebSocket.OPEN) return reject(new Error('Not connected; try again in a moment.'));
+      const msg = JSON.stringify({ type: 'op', cid, op } satisfies ClientMessage);
+      if (new Blob([msg]).size > MAX_CLIENT_MESSAGE) return reject(new Error('That action is too big to send; try fewer cards at once.'));
       this.pending.set(cid, { resolve, reject });
-      this.post({ type: 'op', cid, op });
+      this.ws.send(msg);
     });
   }
 
@@ -61,6 +64,7 @@ export class GameClient {
     ws.onmessage = (e) => this.receive(JSON.parse(e.data) as ServerMessage);
     ws.onclose = () => {
       clearInterval(this.ping);
+      this.chunks.clear();
       this.events.status(false);
       for (const p of this.pending.values()) p.reject(new Error('Connection lost; try again.'));
       this.pending.clear();
@@ -73,6 +77,16 @@ export class GameClient {
 
   private receive(msg: ServerMessage) {
     switch (msg.type) {
+      case 'chunk': {
+        const parts = this.chunks.get(msg.id) ?? new Array<string>(msg.n);
+        parts[msg.i] = msg.data;
+        this.chunks.set(msg.id, parts);
+        if (parts.filter((p) => p !== undefined).length === msg.n) {
+          this.chunks.delete(msg.id);
+          this.receive(JSON.parse(parts.join('')) as ServerMessage);
+        }
+        break;
+      }
       case 'snapshot': {
         this.state = msg.state;
         this.events.status(true);

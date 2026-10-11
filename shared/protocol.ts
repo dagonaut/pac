@@ -14,7 +14,17 @@ export type ServerMessage =
   | { type: 'op'; entry: LogEntry }
   /** Only to the sender, when its op was rejected. */
   | { type: 'error'; cid?: string; message: string }
-  | { type: 'pong' };
+  | { type: 'pong' }
+  /** Piece `i` of `n` of a message too big for one WebSocket frame (API Gateway caps them at 128 KB).
+   *  Join the `data` strings in order and parse the result as a ServerMessage. */
+  | { type: 'chunk'; id: string; i: number; n: number; data: string };
+
+/** Characters per chunk. API Gateway limits WebSocket frames to 32 KB, so even all-multi-byte
+ *  UTF-8 (3 bytes/char) fits. */
+export const CHUNK_CHARS = 10_000;
+
+/** Largest message a client may send (one frame, 32 KB, with some headroom). */
+export const MAX_CLIENT_MESSAGE = 30_000;
 
 /** Room summary for the lobby list. */
 export interface RoomSummary {

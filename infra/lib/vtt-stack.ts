@@ -101,14 +101,28 @@ export class VttStack extends Stack {
     });
     wsApi.grantManageConnections(wsFn);
 
-    // ---- HTTP API (rooms + join) ------------------------------------------------------------
+    // ---- Assets (card art) ---------------------------------------------------------------------
+
+    // Uploaded straight from the browser with presigned POSTs; served by CloudFront at /assets/*.
+    // Retained like the Game table: it's campaign content. CORS can't name the CloudFront domain
+    // (it would be circular), and the presigned policy is what actually limits uploads, so allow any origin.
+    const assets = new s3.Bucket(this, 'Assets', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+      cors: [{ allowedMethods: [s3.HttpMethods.POST], allowedOrigins: ['*'], allowedHeaders: ['*'], maxAge: 3600 }],
+    });
+
+    // ---- HTTP API (rooms + join + uploads) -------------------------------------------------
 
     const apiFn = fn('ApiFn', 'api.ts', {
       ROOMS_TABLE: rooms.tableName,
       WS_URL: wsStage.url,
       CHIME_CONTROL_REGION: CHIME_CONTROL_REGIONS.includes(this.region) ? this.region : 'us-east-1',
       CHIME_MEDIA_REGION: this.region,
+      ASSETS_BUCKET: assets.bucketName,
     });
+    assets.grantPut(apiFn);
     rooms.grantReadWriteData(apiFn);
     game.grantReadWriteData(apiFn);
     tableKey.grantRead(apiFn);
@@ -121,7 +135,7 @@ export class VttStack extends Stack {
 
     const api = new HttpApi(this, 'Api', { apiName: 'pac-vtt-api' });
     const apiIntegration = new HttpLambdaIntegration('ApiIntegration', apiFn);
-    for (const p of ['/api/join', '/api/rooms', '/api/rooms/create']) {
+    for (const p of ['/api/join', '/api/rooms', '/api/rooms/create', '/api/assets']) {
       api.addRoutes({ path: p, methods: [HttpMethod.POST], integration: apiIntegration });
     }
     // Cheap guard against someone hammering the endpoint.
@@ -151,6 +165,11 @@ export class VttStack extends Stack {
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
       },
       additionalBehaviors: {
+        '/assets/*': {
+          origin: S3BucketOrigin.withOriginAccessControl(assets),
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+        },
         '/api/*': {
           origin: new HttpOrigin(Fn.select(2, Fn.split('/', api.apiEndpoint))),
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,

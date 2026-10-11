@@ -24,7 +24,7 @@ function roundTrip(s: RoomState, op: Op) {
   const before = structuredClone(s);
   const inv = apply(s, op);
   assert.ok(inv, `${op.kind} should be undoable`);
-  apply(s, inv);
+  apply(s, JSON.parse(JSON.stringify(inv))); // inverses are stored and sent as JSON
   assert.deepEqual(s, before);
 }
 
@@ -132,4 +132,41 @@ test('undo resolves through the server callback and applies the inverse', () => 
   const op = resolve(s, { kind: 'undo' }, { rand: prng, undo: () => ({ target: 7, op: inv }) });
   apply(s, op);
   assert.equal(s.pieces.p0.tapped, false);
+});
+
+test('zone.update and field.set reverse (including unset slots)', () => {
+  const s = room();
+  roundTrip(s, { kind: 'zone.update', id: 'row', set: { label: 'Market', slots: ['Weapon', 'Armor'] } });
+  apply(s, { kind: 'zone.update', id: 'row', set: { slots: ['A'] } });
+  roundTrip(s, { kind: 'zone.update', id: 'row', set: { slots: [] } });
+  roundTrip(s, { kind: 'field.set', zone: 'row', key: 'HP', value: '10' });
+  apply(s, { kind: 'field.set', zone: 'row', key: 'HP', value: '10' });
+  roundTrip(s, { kind: 'field.set', zone: 'row', key: 'HP', value: '7' });
+  roundTrip(s, { kind: 'field.set', zone: 'row', key: 'HP', value: null });
+  assert.throws(() => apply(s, { kind: 'zone.update', id: 'row', set: { kind: 'deck' } as never }), OpError);
+});
+
+test('cards: create/update/delete reverse; cards in use cannot be deleted', () => {
+  const s = room();
+  roundTrip(s, { kind: 'card.create', card: { id: 'cx', name: 'X', front: '/a/x.png' } });
+  apply(s, { kind: 'card.create', card: { id: 'cx', name: 'X', front: '/a/x.png' } });
+  roundTrip(s, { kind: 'card.update', id: 'cx', set: { upgraded: '/a/x2.png', back: '/a/b.png' } });
+  roundTrip(s, { kind: 'card.delete', id: 'cx' });
+  apply(s, { kind: 'card.create', card: { id: 'c0', name: 'Zero', front: '/a/0.png' } });
+  assert.throws(() => apply(s, { kind: 'card.delete', id: 'c0' }), OpError); // p0 uses it
+  assert.throws(() => apply(s, { kind: 'card.create', card: { id: 'cy', name: 'Y', front: '/y', evil: 1 } as never }), OpError);
+});
+
+test('importing a batch of cards undoes completely', () => {
+  const s = room();
+  const before = structuredClone(s);
+  const inv = apply(s, {
+    kind: 'batch',
+    ops: [
+      { kind: 'card.create', card: { id: 'k1', name: 'K1', front: '/k1' } },
+      { kind: 'piece.create', piece: newPiece('q1', 'k1', 'deck') },
+    ],
+  })!;
+  apply(s, inv);
+  assert.deepEqual(s, before);
 });

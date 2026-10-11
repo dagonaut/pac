@@ -12,6 +12,10 @@ export interface Zone {
   label: string;
   /** Seat name for per-person zones (sheet slots, hand). */
   owner?: string;
+  /** Named slots for a `slots` zone (e.g. Weapon, Armor). A piece's index is its slot number. */
+  slots?: string[];
+  /** Free-form values shown with the zone, e.g. a sheet's HP or Charge. */
+  fields?: Record<string, string>;
 }
 
 /** Imported card art. `back` falls back to the deck's back; `upgraded` replaces the front. */
@@ -76,7 +80,12 @@ export type Op =
   | { kind: 'gm'; seat: string | null }
   | { kind: 'zone.create'; zone: Zone }
   | { kind: 'zone.delete'; id: string }
+  | { kind: 'zone.update'; id: string; set: { label?: string; slots?: string[] } }
+  | { kind: 'field.set'; zone: string; key: string; value: string | null }
   | { kind: 'card.create'; card: CardDef }
+  | { kind: 'card.update'; id: string; set: Partial<Omit<CardDef, 'id'>> }
+  /** Only for cards with no pieces left on the table. */
+  | { kind: 'card.delete'; id: string }
   | { kind: 'piece.create'; piece: Piece }
   | { kind: 'piece.delete'; id: string }
   | { kind: 'piece.update'; id: string; set: Partial<PieceProps> }

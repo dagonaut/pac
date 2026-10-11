@@ -2,8 +2,10 @@ import type { RoomState } from '../../shared/model.ts';
 import type { RoomSummary } from '../../shared/protocol.ts';
 import { createRoom, joinRoom, listRooms } from './api';
 import type { AvSession, Participant, VideoTile } from './av';
+import { createBoard } from './board';
 import { joinChime } from './chime-av';
 import { GameClient } from './game';
+import { createImporter } from './importer';
 import { addEntry, clearLog, note, resetLog } from './log';
 import { cameraError, getPermissions, micError, pick, probeCamera } from './media';
 import { systemName, systems } from './systems/index';
@@ -140,6 +142,7 @@ let session: AvSession | null = null;
 let game: GameClient | null = null;
 let me = '';
 let roomId = '';
+let token = '';
 let muted = false;
 let cameraOn = false;
 
@@ -214,13 +217,24 @@ function renderState(state: RoomState) {
   gmBtn.textContent = state.gm === me ? 'Leave GM seat' : 'Take GM seat';
 }
 
-async function act(op: Parameters<GameClient['send']>[0]) {
+async function act(op: Parameters<GameClient['send']>[0]): Promise<boolean> {
   try {
-    await game?.send(op);
+    if (!game) return false;
+    await game.send(op);
+    return true;
   } catch (e) {
     note((e as Error).message);
+    return false;
   }
 }
+
+const board = createBoard($('#board'), {
+  me: () => me,
+  state: () => game?.state ?? null,
+  act,
+  note,
+  openImport: createImporter({ token: () => token, state: () => game?.state ?? null, act }),
+});
 
 $('#dice').addEventListener('click', (e) => {
   const expr = (e.target as HTMLElement).dataset.expr;
@@ -347,6 +361,7 @@ async function enterRoom(id: string, button: HTMLButtonElement) {
     const join = await joinRoom(who.key.value, id, who.name.value.trim());
     me = join.name;
     roomId = join.room.id;
+    token = join.token;
 
     const devices = await navigator.mediaDevices.enumerateDevices();
     const cameraId = perms.camera ? pick(devices, 'videoinput', prefs.get('cam')) : undefined;
@@ -356,11 +371,13 @@ async function enterRoom(id: string, button: HTMLButtonElement) {
     game = new GameClient(join.wsUrl, join.token, {
       snapshot: (state, log) => {
         renderState(state);
-        resetLog(log, state);
+        board.render(state);
+        resetLog(log, state, me);
       },
       op: (entry, state) => {
         renderState(state);
-        addEntry(entry, state);
+        board.render(state);
+        addEntry(entry, state, me);
       },
       status: (connected) => ($('#conn-status').hidden = connected),
       error: (message) => note(message),

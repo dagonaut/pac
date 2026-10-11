@@ -13,5 +13,8 @@
     "typecheck": "npm run typecheck -w infra && npm run typecheck -w web",
     "deploy": "npm run build -w web && npm run cdk -w infra -- deploy --all --require-approval never",
     "diff": "npm run cdk -w infra -- diff --all"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
   }
 }

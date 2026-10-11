@@ -1,0 +1,527 @@
+// The shared table: zone bar (decks, rows, discards), the free-placement table surface, the sheet
+// dock, drag and drop between any of them, card/zone menus and the hover preview. Every change goes
+// out as an op; the screen only changes when the server's broadcast comes back.
+import type { Op, Piece, PieceProps, RoomState, Zone, ZoneKind } from '../../shared/model.ts';
+import { h, shortId } from './dom';
+import { cardName, faceOf, pieceEl, prunePieceEls } from './pieces';
+import { renderDock } from './sheets';
+
+export interface TableCtx {
+  me(): string;
+  state(): RoomState | null;
+  act(op: Op): Promise<boolean>;
+  note(msg: string): void;
+  openImport(zoneId?: string): void;
+}
+
+const TABLE_W = 3200;
+const TABLE_H = 2000;
+const CARD_W = 110; // card width on the table, in table pixels
+
+const byIndex = (a: Piece, b: Piece) => a.index - b.index;
+const piecesIn = (state: RoomState, zone: string) => Object.values(state.pieces).filter((p) => p.zone === zone).sort(byIndex);
+const zoneTitle = (z: Zone) => (z.owner && !z.label.includes(z.owner) ? `${z.owner}: ${z.label}` : z.label);
+
+export function createBoard(root: HTMLElement, ctx: TableCtx) {
+  const bar = h('div.board-bar');
+  const surface = h('div.table-surface', { style: { width: `${TABLE_W}px`, height: `${TABLE_H}px` } });
+  const wrap = h('div.table-wrap', {}, surface);
+  const zoomLabel = h('span', {}, '100%');
+  const zoomBox = h('div.zoom',
+    {},
+    h('button', { type: 'button', title: 'Zoom out', onclick: () => setZoom(zoom / 1.2) }, '−'),
+    zoomLabel,
+    h('button', { type: 'button', title: 'Zoom in', onclick: () => setZoom(zoom * 1.2) }, '+'),
+  );
+  const dock = h('div.sheet-dock');
+  const preview = h('div.preview', { hidden: true });
+  const menu = h('div.menu', { hidden: true });
+  root.replaceChildren(bar, h('div.table-area', {}, wrap, zoomBox), dock, preview);
+  document.body.append(menu);
+
+  let zoom = Number(localStorage.getItem('vtt.zoom')) || 1;
+  function setZoom(z: number) {
+    zoom = Math.min(2, Math.max(0.3, z));
+    surface.style.transform = `scale(${zoom})`;
+    surface.parentElement!.style.setProperty('--zoom', String(zoom));
+    zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
+    try {
+      localStorage.setItem('vtt.zoom', String(zoom));
+    } catch { /* ignore */ }
+  }
+  setZoom(zoom);
+  wrap.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    setZoom(zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
+  }, { passive: false });
+
+  const st = () => ctx.state()!;
+  const me = () => ctx.me();
+  const isGm = () => st().gm === me();
+
+  // ---- Moving pieces ----------------------------------------------------------------------------
+
+  /** Where the middle of the visible table is, in table coordinates (for "send to table"). */
+  function visibleCenter() {
+    const x = (wrap.scrollLeft + wrap.clientWidth / 2) / zoom - CARD_W / 2;
+    const y = (wrap.scrollTop + wrap.clientHeight / 2) / zoom - CARD_W * 0.7;
+    const jitter = () => Math.round(Math.random() * 40 - 20);
+    return { x: Math.round(x) + jitter(), y: Math.round(y) + jitter() };
+  }
+
+  /** The piece.update fields for moving a piece into `zone`. */
+  function moveSet(p: Piece, zone: Zone, extra: Partial<PieceProps> = {}): Partial<PieceProps> {
+    const set: Partial<PieceProps> = { zone: zone.id, ...extra };
+    if (zone.kind === 'deck') Object.assign(set, { faceUp: false, tapped: false });
+    if (zone.kind === 'discard') Object.assign(set, { faceUp: true, tapped: false });
+    if (zone.kind === 'board' && extra.x === undefined) Object.assign(set, visibleCenter());
+    if (p.zone !== zone.id && st().zones[p.zone]?.kind === 'deck' && zone.kind !== 'deck') set.faceUp ??= true;
+    return set;
+  }
+
+  const update = (id: string, set: Partial<PieceProps>) => ctx.act({ kind: 'piece.update', id, set });
+
+  // ---- Menus ----------------------------------------------------------------------------------
+
+  function closeMenu() {
+    menu.hidden = true;
+    menu.replaceChildren();
+  }
+
+  function openMenu(anchor: DOMRect, ...items: (Node | false | null | undefined)[]) {
+    menu.replaceChildren(...items.filter((i): i is Node => !!i));
+    menu.hidden = false;
+    const r = menu.getBoundingClientRect();
+    const left = Math.min(anchor.right + 6, window.innerWidth - r.width - 8);
+    const top = Math.min(anchor.top, window.innerHeight - r.height - 8);
+    menu.style.left = `${Math.max(8, left)}px`;
+    menu.style.top = `${Math.max(8, top)}px`;
+  }
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!menu.hidden && !menu.contains(e.target as Node)) closeMenu();
+  });
+  document.addEventListener('keydown', (e) => e.key === 'Escape' && closeMenu());
+
+  const item = (label: string, run: () => unknown, opts: { hint?: string; danger?: boolean } = {}) =>
+    h('button.menu-item', {
+      type: 'button',
+      className: `menu-item${opts.danger ? ' danger' : ''}`,
+      onclick: () => {
+        closeMenu();
+        void run();
+      },
+    }, label, opts.hint ? h('kbd', {}, opts.hint) : null);
+
+  const heading = (text: string) => h('div.menu-heading', {}, text);
+
+  function sendToItems(p: Piece) {
+    const zones = Object.values(st().zones).filter((z) => z.id !== p.zone);
+    return zones.map((z) => item(zoneTitle(z), () => update(p.id, moveSet(p, z))));
+  }
+
+  function counterRow(p: Piece, name: string, n: number) {
+    const set = (v: number | null) => {
+      const counters = { ...p.counters };
+      if (v === null) delete counters[name];
+      else counters[name] = v;
+      closeMenu();
+      void update(p.id, { counters });
+    };
+    return h('div.counter-row', {},
+      h('span', {}, name),
+      h('button', { type: 'button', onclick: () => set(n - 1) }, '−'),
+      h('b', {}, String(n)),
+      h('button', { type: 'button', onclick: () => set(n + 1) }, '+'),
+      h('button', { type: 'button', title: 'Remove counter', onclick: () => set(null) }, '×'),
+    );
+  }
+
+  function pieceMenu(p: Piece, anchor: DOMRect) {
+    const card = st().cards[p.def];
+    const face = faceOf(p, st(), me());
+    openMenu(anchor,
+      heading(cardName(p, st(), me())),
+      item(p.faceUp ? 'Flip face down' : 'Flip face up', () => update(p.id, { faceUp: !p.faceUp }), { hint: 'F' }),
+      item(p.tapped ? 'Untap' : 'Tap', () => update(p.id, { tapped: !p.tapped }), { hint: 'T' }),
+      item(p.upgraded ? 'Remove upgrade' : card?.upgraded ? 'Upgrade' : 'Mark upgraded', () => update(p.id, { upgraded: !p.upgraded }), { hint: 'U' }),
+      ...Object.entries(p.counters).map(([name, n]) => counterRow(p, name, n)),
+      item('Add counter…', () => {
+        const name = prompt('Counter name (e.g. dmg, charge):', 'charge')?.trim().slice(0, 30);
+        if (name) return update(p.id, { counters: { ...p.counters, [name]: p.counters[name] ?? 1 } });
+      }),
+      item(p.note ? 'Edit note…' : 'Add note…', () => {
+        const note = prompt('Note on this card:', p.note);
+        if (note !== null) return update(p.id, { note: note.slice(0, 1000) });
+      }),
+      isGm() && item(p.visibleTo === 'all' ? 'Hide from players' : 'Show to everyone',
+        () => update(p.id, { visibleTo: p.visibleTo === 'all' ? 'gm' : 'all' })),
+      face.front && item('Show large', () => showPreview(p, true)),
+      heading('Send to'),
+      ...sendToItems(p),
+      h('hr'),
+      item('Delete card', () => confirm(`Remove ${cardName(p, st(), me())} from the table?`) && ctx.act({ kind: 'piece.delete', id: p.id }), { danger: true }),
+    );
+  }
+
+  function zoneMenu(z: Zone, anchor: DOMRect) {
+    const state = st();
+    const pieces = piecesIn(state, z.id);
+    const targets = Object.values(state.zones).filter((t) => t.kind !== 'deck' && t.id !== z.id);
+    const decks = Object.values(state.zones).filter((t) => t.kind === 'deck' && t.id !== z.id);
+    const discards = Object.values(state.zones).filter((t) => t.kind === 'discard' && t.id !== z.id);
+
+    let drawBox: HTMLElement | null = null;
+    if (z.kind === 'deck') {
+      const count = h('input', { type: 'number', min: '1', max: '50', value: '1' });
+      const dest = h('select', {}, ...targets.map((t) => new Option(zoneTitle(t), t.id, false, t.kind === 'row' && !t.owner)));
+      drawBox = h('form.draw-box', {
+        onsubmit: (e: Event) => {
+          e.preventDefault();
+          closeMenu();
+          void ctx.act({ kind: 'draw', from: z.id, to: dest.value, count: Number(count.value) || 1 });
+        },
+      }, h('label', {}, 'Draw ', count), h('label', {}, 'to ', dest), h('button', { type: 'submit' }, 'Draw'));
+      if (!pieces.length || !targets.length) drawBox = null;
+    }
+
+    const moveAll = (to: Zone) => ctx.act({ kind: 'batch', ops: pieces.map((p) => ({ kind: 'piece.update', id: p.id, set: moveSet(p, to) }) as Op) });
+
+    openMenu(anchor,
+      heading(`${zoneTitle(z)} (${pieces.length})`),
+      drawBox,
+      z.kind === 'deck' && !pieces.length && h('p.menu-hint', {}, 'Empty. Import cards or send cards here.'),
+      z.kind === 'discard' && pieces.length > 0 && item('View cards', () => viewZone(z)),
+      ...(pieces.length && z.kind !== 'deck' ? decks.map((d) => item(`Shuffle all into ${d.label}`, () => moveAll(d))) : []),
+      ...(pieces.length && z.kind !== 'discard' && z.kind !== 'deck' ? discards.map((d) => item(`Move all to ${d.label}`, () => moveAll(d))) : []),
+      z.kind === 'deck' && item('Import cards here…', () => ctx.openImport(z.id)),
+      h('hr'),
+      item('Rename…', () => {
+        const label = prompt('Name:', z.label)?.trim().slice(0, 80);
+        if (label) return ctx.act({ kind: 'zone.update', id: z.id, set: { label } });
+      }),
+      z.kind === 'slots' && item('Edit slots…', () => {
+        const raw = prompt('Slot names, separated by commas (empty for a free row):', (z.slots ?? []).join(', '));
+        if (raw !== null) {
+          const slots = raw.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 50);
+          return ctx.act({ kind: 'zone.update', id: z.id, set: { slots } });
+        }
+      }),
+      !pieces.length && item('Delete', () => ctx.act({ kind: 'zone.delete', id: z.id }), { danger: true }),
+    );
+  }
+
+  function addZoneMenu(anchor: DOMRect, owner?: string) {
+    const label = h('input', { required: true, maxLength: 80, placeholder: 'Name' });
+    const kinds: [ZoneKind, string][] = owner
+      ? [['slots', 'Sheet slots'], ['row', 'Row']]
+      : [['deck', 'Deck (hidden, random draws)'], ['row', 'Row (face-up selection)'], ['discard', 'Discard pile']];
+    const kind = h('select', {}, ...kinds.map(([k, l]) => new Option(l, k)));
+    openMenu(anchor,
+      heading(owner ? `New zone for ${owner}` : 'New zone'),
+      h('form.add-zone', {
+        onsubmit: (e: Event) => {
+          e.preventDefault();
+          closeMenu();
+          void ctx.act({ kind: 'zone.create', zone: { id: `${kind.value}-${shortId()}`, kind: kind.value as ZoneKind, label: label.value.trim(), owner } });
+        },
+      }, label, kind, h('button', { type: 'submit' }, 'Add')),
+    );
+    label.focus();
+  }
+
+  function viewZone(z: Zone) {
+    const state = st();
+    const list = h('div.zone-view');
+    for (const p of piecesIn(state, z.id).reverse()) {
+      const face = faceOf(p, state, me());
+      const thumb = h('button.thumb', { type: 'button', title: cardName(p, state, me()) },
+        face.src ? h('img', { src: face.src, alt: '' }) : h('div.back-default', {}, h('span', {}, 'PAC')));
+      thumb.addEventListener('click', () => {
+        dialog.close();
+        pieceMenu(p, thumb.getBoundingClientRect());
+      });
+      list.append(thumb);
+    }
+    const dialog = h('dialog.modal', { onclose: () => dialog.remove() },
+      h('h3', {}, `${zoneTitle(z)} (${list.childElementCount})`), list,
+      h('form', { method: 'dialog' }, h('button', {}, 'Close')));
+    document.body.append(dialog);
+    dialog.showModal();
+  }
+
+  // ---- Preview --------------------------------------------------------------------------------
+
+  let previewFor: string | null = null;
+  function showPreview(p: Piece, pinned = false) {
+    const state = st();
+    const face = faceOf(p, state, me());
+    if (!face.front || !face.src) return hidePreview();
+    previewFor = p.id;
+    const counters = Object.entries(p.counters).map(([k, v]) => `${k}: ${v}`).join(' · ');
+    preview.replaceChildren(
+      h('img', { src: face.src, alt: '' }),
+      h('div.preview-caption', {}, h('b', {}, state.cards[p.def]?.name ?? ''), counters && h('div', {}, counters), p.note && h('div', {}, p.note)),
+    );
+    preview.classList.toggle('pinned', pinned);
+    preview.hidden = false;
+    if (pinned) preview.onclick = hidePreview;
+  }
+  function hidePreview() {
+    previewFor = null;
+    preview.hidden = true;
+    preview.onclick = null;
+  }
+
+  // ---- Drag and drop --------------------------------------------------------------------------
+
+  interface Drag {
+    id: string;
+    el: HTMLElement;
+    startX: number;
+    startY: number;
+    offX: number;
+    offY: number;
+    ghost: HTMLElement | null;
+    target: HTMLElement | null;
+  }
+  let drag: Drag | null = null;
+  let hovered: string | null = null;
+
+  root.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const el = (e.target as HTMLElement).closest<HTMLElement>('.piece');
+    if (el) {
+      const r = el.getBoundingClientRect();
+      drag = { id: el.dataset.piece!, el, startX: e.clientX, startY: e.clientY, offX: e.clientX - r.left, offY: e.clientY - r.top, ghost: null, target: null };
+      el.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      return;
+    }
+    // Drag empty table space to pan.
+    if ((e.target as HTMLElement).closest('.table-surface')) {
+      const sx = e.clientX, sy = e.clientY, sl = wrap.scrollLeft, stp = wrap.scrollTop;
+      const move = (ev: PointerEvent) => {
+        wrap.scrollLeft = sl - (ev.clientX - sx);
+        wrap.scrollTop = stp - (ev.clientY - sy);
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        wrap.classList.remove('panning');
+      };
+      wrap.classList.add('panning');
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up, { once: true });
+    }
+  });
+
+  root.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    if (!drag.ghost) {
+      if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 5) return;
+      const r = drag.el.getBoundingClientRect();
+      drag.ghost = drag.el.cloneNode(true) as HTMLElement;
+      drag.ghost.classList.add('ghost');
+      Object.assign(drag.ghost.style, { width: `${r.width}px`, height: `${r.height}px` });
+      document.body.append(drag.ghost);
+      drag.el.classList.add('dragging');
+      hidePreview();
+      closeMenu();
+    }
+    drag.ghost.style.transform = `translate(${e.clientX - drag.offX}px, ${e.clientY - drag.offY}px)`;
+    const under = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+    const target = under?.closest<HTMLElement>('[data-zone]') ?? null;
+    if (target !== drag.target) {
+      drag.target?.classList.remove('drop-target');
+      target?.classList.add('drop-target');
+      drag.target = target;
+    }
+  });
+
+  root.addEventListener('pointerup', (e) => {
+    const d = drag;
+    drag = null;
+    if (!d) return;
+    if (!d.ghost) {
+      const p = st().pieces[d.id];
+      if (p) pieceMenu(p, d.el.getBoundingClientRect());
+      return;
+    }
+    d.ghost.remove();
+    d.el.classList.remove('dragging');
+    d.target?.classList.remove('drop-target');
+    const p = st().pieces[d.id];
+    const zone = d.target && st().zones[d.target.dataset.zone!];
+    if (!p || !zone) return;
+    void update(p.id, dropSet(p, zone, d.target!, e, d));
+  });
+
+  function dropSet(p: Piece, zone: Zone, target: HTMLElement, e: PointerEvent, d: Drag): Partial<PieceProps> {
+    if (zone.kind === 'board') {
+      const r = surface.getBoundingClientRect();
+      const x = Math.round((e.clientX - d.offX - r.left) / zoom);
+      const y = Math.round((e.clientY - d.offY - r.top) / zoom);
+      const pos = { x: Math.max(0, Math.min(TABLE_W - CARD_W, x)), y: Math.max(0, Math.min(TABLE_H - CARD_W, y)) };
+      return zone.id === p.zone ? pos : moveSet(p, zone, pos);
+    }
+    if (zone.kind === 'deck' || zone.kind === 'discard') return moveSet(p, zone);
+    // Slots: the cell under the pointer is the index.
+    const cell = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>('[data-slot]');
+    if (zone.slots?.length && cell) return moveSet(p, zone, { index: Number(cell.dataset.slot) });
+    // Rows: insert between the neighbours either side of the pointer.
+    const others = [...target.querySelectorAll<HTMLElement>('.piece')].filter((el) => el.dataset.piece !== p.id);
+    const idx = (el: HTMLElement) => st().pieces[el.dataset.piece!]?.index ?? 0;
+    const after = others.findIndex((el) => {
+      const r = el.getBoundingClientRect();
+      return e.clientX < r.left + r.width / 2;
+    });
+    let index: number;
+    if (!others.length) index = 0;
+    else if (after === -1) index = idx(others[others.length - 1]) + 1;
+    else if (after === 0) index = idx(others[0]) - 1;
+    else index = (idx(others[after - 1]) + idx(others[after])) / 2;
+    return moveSet(p, zone, { index });
+  }
+
+  root.addEventListener('pointerover', (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('.piece');
+    if (!el || drag) return;
+    hovered = el.dataset.piece!;
+    const p = st().pieces[hovered];
+    if (p && !preview.classList.contains('pinned')) {
+      showPreview(p);
+      // Keep the preview on the side away from the pointer.
+      preview.classList.toggle('left', e.clientX > window.innerWidth / 2);
+    }
+  });
+  root.addEventListener('pointerout', (e) => {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('.piece');
+    if (!el || el.contains(e.relatedTarget as Node)) return;
+    hovered = null;
+    if (!preview.classList.contains('pinned')) hidePreview();
+  });
+
+  // Keyboard shortcuts on the card under the pointer.
+  document.addEventListener('keydown', (e) => {
+    const tag = (e.target as HTMLElement).tagName;
+    if (root.closest('[hidden]') || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      void ctx.act({ kind: 'undo' });
+      return;
+    }
+    const p = hovered ? st()?.pieces[hovered] : undefined;
+    if (!p || e.ctrlKey || e.metaKey || e.altKey) return;
+    const key = e.key.toLowerCase();
+    if (key === 'f') void update(p.id, { faceUp: !p.faceUp });
+    else if (key === 't') void update(p.id, { tapped: !p.tapped });
+    else if (key === 'u') void update(p.id, { upgraded: !p.upgraded });
+    else return;
+    e.preventDefault();
+  });
+
+  // ---- Rendering ------------------------------------------------------------------------------
+
+  function zoneHeader(z: Zone, count: number, inDock = false) {
+    const more = h('button.zone-more', { type: 'button', title: 'Zone actions' }, '⋯');
+    more.addEventListener('click', () => zoneMenu(z, more.getBoundingClientRect()));
+    return h('div.zone-head', {}, h('span', {}, inDock ? z.label : zoneTitle(z)), h('small', {}, String(count)), more);
+  }
+
+  function renderPile(z: Zone, state: RoomState) {
+    const pieces = piecesIn(state, z.id);
+    const pile = h('div.zone.pile', { dataset: { zone: z.id, kind: z.kind } }, zoneHeader(z, pieces.length));
+    const stack = h('div.pile-stack');
+    if (z.kind === 'deck') {
+      // Decks never show their cards: a back image (from the cards) or the default back.
+      const back = pieces.map((p) => state.cards[p.def]?.back).find(Boolean);
+      stack.append(pieces.length
+        ? (back ? h('img.pile-back', { src: back, alt: '' }) : h('div.back-default', {}, h('span', {}, 'PAC')))
+        : h('div.pile-empty', {}, 'empty'));
+      stack.addEventListener('click', () => zoneMenu(z, stack.getBoundingClientRect()));
+      stack.title = 'Draw…';
+    } else {
+      const top = pieces[pieces.length - 1];
+      stack.append(top ? pieceEl(top, state, me()) : h('div.pile-empty', {}, 'empty'));
+    }
+    pile.append(stack);
+    return pile;
+  }
+
+  function renderStrip(z: Zone, state: RoomState) {
+    const pieces = piecesIn(state, z.id);
+    // Sheet zones live in the dock under their owner's tab, so the owner prefix is redundant there.
+    const strip = h('div.zone.strip', { dataset: { zone: z.id, kind: z.kind } }, zoneHeader(z, pieces.length, !!z.owner));
+    const cards = h('div.strip-cards');
+    if (z.slots?.length) {
+      z.slots.forEach((label, i) => {
+        const cell = h('div.slot', { dataset: { slot: String(i) } }, h('small.slot-label', {}, label));
+        for (const p of pieces.filter((p) => Math.round(p.index) === i)) cell.append(pieceEl(p, state, me()));
+        cards.append(cell);
+      });
+      // Pieces outside the named slots still need to be reachable.
+      for (const p of pieces.filter((p) => !(Math.round(p.index) >= 0 && Math.round(p.index) < z.slots!.length))) {
+        cards.append(pieceEl(p, state, me()));
+      }
+    } else {
+      for (const p of pieces) cards.append(pieceEl(p, state, me()));
+      if (!pieces.length) cards.append(h('div.strip-empty', {}, 'Drop cards here'));
+    }
+    strip.append(cards);
+    return strip;
+  }
+
+  function renderZone(z: Zone, state: RoomState) {
+    return z.kind === 'deck' || z.kind === 'discard' ? renderPile(z, state) : renderStrip(z, state);
+  }
+
+  function render(state: RoomState) {
+    const zones = Object.values(state.zones);
+    const table = zones.find((z) => z.kind === 'board');
+    const shared = zones.filter((z) => !z.owner && z !== table);
+    const order: ZoneKind[] = ['deck', 'row', 'slots', 'hand', 'discard', 'board'];
+    shared.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
+
+    const addBtn = h('button.bar-btn', { type: 'button' }, '+ Zone');
+    addBtn.addEventListener('click', () => addZoneMenu(addBtn.getBoundingClientRect()));
+    const importBtn = h('button.bar-btn', { type: 'button', onclick: () => ctx.openImport() }, 'Import cards');
+    bar.replaceChildren(...shared.map((z) => renderZone(z, state)), h('div.bar-actions', {}, importBtn, addBtn));
+
+    const keep = new Set<string>();
+    if (table) {
+      surface.dataset.zone = table.id;
+      const onTable = piecesIn(state, table.id);
+      for (const p of onTable) {
+        const el = pieceEl(p, state, me());
+        el.style.left = `${p.x}px`;
+        el.style.top = `${p.y}px`;
+        el.style.zIndex = String(Math.round(p.index) + 10);
+        if (el.parentElement !== surface) surface.append(el);
+        keep.add(p.id);
+      }
+    } else {
+      delete surface.dataset.zone;
+    }
+
+    renderDock(dock, state, {
+      me: me(),
+      renderZone,
+      act: ctx.act,
+      addZone: (anchor, owner) => addZoneMenu(anchor, owner),
+    });
+
+    // Elements for pieces in decks or deleted pieces are dropped; ones currently shown are kept.
+    root.querySelectorAll<HTMLElement>('.piece').forEach((el) => keep.add(el.dataset.piece!));
+    prunePieceEls(keep);
+    for (const el of surface.querySelectorAll<HTMLElement>('.piece')) {
+      if (state.pieces[el.dataset.piece!]?.zone !== table?.id) el.remove();
+    }
+    for (const el of root.querySelectorAll<HTMLElement>('.strip .piece, .pile .piece, .sheet-dock .piece')) {
+      el.style.left = el.style.top = el.style.zIndex = '';
+    }
+    if (previewFor && !state.pieces[previewFor]) hidePreview();
+  }
+
+  return { render };
+}

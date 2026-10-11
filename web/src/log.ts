@@ -1,6 +1,7 @@
 // The room log: chat, rolls and a one-line description of every other action.
 import { describeRoll } from '../../shared/dice.ts';
 import type { LogEntry, Op, RoomState } from '../../shared/model.ts';
+import { cardName } from './pieces';
 
 const logEl = document.querySelector<HTMLOListElement>('#log')!;
 
@@ -8,14 +9,24 @@ function scrollToEnd() {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-function describe(op: Op, state: RoomState): string {
-  const card = (id: string) => state.cards[state.pieces[id]?.def]?.name ?? 'a card';
+function describe(op: Op, state: RoomState, me: string): string {
+  // Don't spoil face-down or hidden cards in the log.
+  const card = (id: string) => {
+    const p = state.pieces[id];
+    if (!p) return 'a card';
+    const name = cardName(p, state, me);
+    return name === 'Face-down card' ? 'a face-down card' : name;
+  };
   const zone = (id: string) => state.zones[id]?.label ?? id;
   switch (op.kind) {
     case 'gm': return op.seat ? `took the GM seat` : 'left the GM seat';
     case 'zone.create': return `added ${op.zone.label}`;
     case 'zone.delete': return `removed a zone`;
+    case 'zone.update': return op.set.label ? `renamed a zone to ${op.set.label}` : `changed ${zone(op.id)}`;
+    case 'field.set': return op.value === null ? `removed ${op.key} from ${zone(op.zone)}` : `set ${op.key} to ${op.value} on ${zone(op.zone)}`;
     case 'card.create': return `imported ${op.card.name}`;
+    case 'card.update': return `changed the art of ${state.cards[op.id]?.name ?? 'a card'}`;
+    case 'card.delete': return 'removed a card from the library';
     case 'piece.create': return `added ${card(op.piece.id)}`;
     case 'piece.delete': return `removed a card`;
     case 'piece.update': {
@@ -23,16 +34,25 @@ function describe(op: Op, state: RoomState): string {
       if (s.zone) return `moved ${card(op.id)} to ${zone(s.zone)}`;
       if (s.faceUp !== undefined) return `flipped ${card(op.id)} ${s.faceUp ? 'face up' : 'face down'}`;
       if (s.tapped !== undefined) return `${s.tapped ? 'tapped' : 'untapped'} ${card(op.id)}`;
+      if (s.upgraded !== undefined) return `${s.upgraded ? 'upgraded' : 'un-upgraded'} ${card(op.id)}`;
+      if (s.visibleTo !== undefined) return s.visibleTo === 'all' ? `revealed ${card(op.id)}` : 'hid a card from players';
+      if (s.counters !== undefined) return `changed counters on ${card(op.id)}`;
+      if (s.note !== undefined) return `wrote a note on ${card(op.id)}`;
+      if (s.x !== undefined) return `moved ${card(op.id)}`;
       return `changed ${card(op.id)}`;
     }
     case 'draw': return `drew ${op.count} from ${zone(op.from)} to ${zone(op.to)}`;
-    case 'batch': return `did ${op.ops.length} things`;
+    case 'batch': {
+      const imported = op.ops.filter((o) => o.kind === 'card.create').length;
+      if (imported) return `imported ${imported} card${imported === 1 ? '' : 's'}`;
+      return `moved ${op.ops.length} cards`;
+    }
     case 'undo': return 'undid their last action';
     default: return op.kind;
   }
 }
 
-export function addEntry(entry: LogEntry, state: RoomState) {
+export function addEntry(entry: LogEntry, state: RoomState, me: string) {
   const li = document.createElement('li');
   li.title = new Date(entry.ts).toLocaleString();
   const who = document.createElement('b');
@@ -54,7 +74,7 @@ export function addEntry(entry: LogEntry, state: RoomState) {
     li.append(total);
   } else {
     li.className = 'action';
-    li.append(` ${describe(op, state)}`);
+    li.append(` ${describe(op, state, me)}`);
   }
   logEl.append(li);
   scrollToEnd();
@@ -69,9 +89,9 @@ export function note(text: string) {
   scrollToEnd();
 }
 
-export function resetLog(entries: LogEntry[], state: RoomState) {
+export function resetLog(entries: LogEntry[], state: RoomState, me: string) {
   logEl.replaceChildren();
-  entries.forEach((e) => addEntry(e, state));
+  entries.forEach((e) => addEntry(e, state, me));
 }
 
 export function clearLog() {
