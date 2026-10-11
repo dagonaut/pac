@@ -25,7 +25,7 @@ export interface StartOptions {
 
 const TOPIC = 'vtt';
 
-// ExternalUserId is "<short id>#<display name>" (see infra/lambda/join.ts)
+// ExternalUserId is "<short id>#<display name>" (see infra/lambda/api.ts)
 const displayName = (externalUserId?: string) => externalUserId?.split('#').slice(1).join('#') || 'Guest';
 
 export async function joinChime(join: JoinInfo, events: AvEvents, opts: StartOptions): Promise<AvSession> {

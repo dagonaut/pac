@@ -1,16 +1,26 @@
+import type { RoomState } from '../../shared/model.ts';
+import type { RoomSummary } from '../../shared/protocol.ts';
+import { createRoom, joinRoom, listRooms } from './api';
 import type { AvSession, Participant, VideoTile } from './av';
-import { joinChime, type JoinInfo } from './chime-av';
+import { joinChime } from './chime-av';
+import { GameClient } from './game';
+import { addEntry, clearLog, note, resetLog } from './log';
+import { cameraError, getPermissions, micError, pick, probeCamera } from './media';
+import { systemName, systems } from './systems/index';
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
-const joinView = $<HTMLElement>('#join-view');
+const lobby = $<HTMLElement>('#lobby');
 const roomView = $<HTMLElement>('#room-view');
-const joinForm = $<HTMLFormElement>('#join-form');
-const joinError = $<HTMLParagraphElement>('#join-error');
+const whoForm = $<HTMLFormElement>('#who');
+const roomsCard = $<HTMLElement>('#rooms');
+const roomList = $<HTMLUListElement>('#room-list');
+const newRoomForm = $<HTMLFormElement>('#new-room');
+const lobbyError = $<HTMLParagraphElement>('#lobby-error');
 const stage = $<HTMLElement>('#stage');
-const log = $<HTMLOListElement>('#log');
 const micBtn = $<HTMLButtonElement>('#mic-btn');
 const camBtn = $<HTMLButtonElement>('#cam-btn');
+const gmBtn = $<HTMLButtonElement>('#gm-btn');
 const micSelect = $<HTMLSelectElement>('#mic-select');
 const camSelect = $<HTMLSelectElement>('#cam-select');
 const spkSelect = $<HTMLSelectElement>('#spk-select');
@@ -34,14 +44,102 @@ const prefs = {
   },
 };
 
-const fields = joinForm.elements as unknown as Record<'room' | 'name' | 'key' | 'camera', HTMLInputElement>;
-fields.room.value = new URLSearchParams(location.search).get('room') ?? prefs.get('room');
-fields.name.value = prefs.get('name');
-fields.key.value = prefs.get('key');
+const who = whoForm.elements as unknown as Record<'name' | 'key' | 'camera', HTMLInputElement>;
+who.name.value = prefs.get('name');
+who.key.value = prefs.get('key');
+const invitedRoom = new URLSearchParams(location.search).get('room');
 
-// ---- Session state ------------------------------------------------------------------------
+// ---- Lobby ----------------------------------------------------------------------------------
+
+function showLobbyError(msg: string) {
+  lobbyError.textContent = msg;
+  lobbyError.hidden = !msg;
+}
+
+function ago(iso: string) {
+  const mins = Math.round((Date.now() - Date.parse(iso)) / 60_000);
+  if (mins < 60) return mins <= 1 ? 'just now' : `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours} h ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function renderRooms(rooms: RoomSummary[]) {
+  // Invited room first.
+  rooms.sort((a, b) => Number(b.id === invitedRoom) - Number(a.id === invitedRoom));
+  roomList.replaceChildren(
+    ...rooms.map((r) => {
+      const li = document.createElement('li');
+      li.classList.toggle('invited', r.id === invitedRoom);
+      const info = document.createElement('div');
+      const name = document.createElement('strong');
+      name.textContent = r.name;
+      const meta = document.createElement('small');
+      meta.textContent = `${systemName(r.system)} · ${ago(r.updated)}`;
+      info.append(name, meta);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Join';
+      btn.addEventListener('click', () => void enterRoom(r.id, btn));
+      li.append(info, btn);
+      return li;
+    }),
+  );
+  if (!rooms.length) roomList.innerHTML = '<li class="muted">No rooms yet. Create one below.</li>';
+  const invite = $<HTMLParagraphElement>('#invite');
+  invite.hidden = !invitedRoom || rooms.some((r) => r.id === invitedRoom);
+  invite.textContent = invitedRoom ? `Couldn't find the room "${invitedRoom}" from your invite link.` : '';
+}
+
+async function loadRooms() {
+  if (!whoForm.reportValidity()) return;
+  showLobbyError('');
+  try {
+    const { rooms } = await listRooms(who.key.value);
+    prefs.set('name', who.name.value.trim());
+    prefs.set('key', who.key.value);
+    renderRooms(rooms);
+    roomsCard.hidden = false;
+  } catch (e) {
+    roomsCard.hidden = true;
+    showLobbyError((e as Error).message);
+  }
+}
+
+whoForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  void loadRooms();
+});
+
+const systemSelect = newRoomForm.elements.namedItem('system') as HTMLSelectElement;
+systemSelect.replaceChildren(...systems.map((s) => new Option(`${s.name} (${s.description})`, s.id)));
+
+newRoomForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const submit = newRoomForm.querySelector('button')!;
+  submit.disabled = true;
+  try {
+    const name = (newRoomForm.elements.namedItem('name') as HTMLInputElement).value.trim();
+    const system = systems.find((s) => s.id === systemSelect.value)!;
+    const { room } = await createRoom(who.key.value, name, system.id, system.setup());
+    newRoomForm.reset();
+    await enterRoom(room.id, submit);
+  } catch (err) {
+    showLobbyError((err as Error).message);
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+// Returning players skip straight to the room list.
+if (who.name.value && who.key.value) void loadRooms();
+
+// ---- Room: video ----------------------------------------------------------------------------
 
 let session: AvSession | null = null;
+let game: GameClient | null = null;
+let me = '';
+let roomId = '';
 let muted = false;
 let cameraOn = false;
 
@@ -87,7 +185,6 @@ function renderRoster(participants: Participant[]) {
     c.el.classList.toggle('muted', p.muted);
     c.el.classList.toggle('speaking', p.speaking && !p.muted);
   }
-  stage.dataset.count = String(participants.length);
 }
 
 function renderTile(tile: VideoTile) {
@@ -108,72 +205,49 @@ function removeTile(tileId: number) {
   }
 }
 
-// ---- Log: chat + dice (temporary; moves onto the game-state channel later) ----------------
+// ---- Room: game state -----------------------------------------------------------------------
 
-type LogMessage = { type: 'chat'; text: string } | { type: 'roll'; sides: number; result: number };
-
-function isLogMessage(d: unknown): d is LogMessage {
-  const m = d as LogMessage;
-  if (m?.type === 'chat') return typeof m.text === 'string';
-  if (m?.type === 'roll') return Number.isInteger(m.sides) && Number.isInteger(m.result);
-  return false;
+function renderState(state: RoomState) {
+  $('#room-name').textContent = state.name;
+  $('#room-system').textContent = systemName(state.system);
+  $('#gm-status').textContent = state.gm ? `GM: ${state.gm}` : 'No GM';
+  gmBtn.textContent = state.gm === me ? 'Leave GM seat' : 'Take GM seat';
 }
 
-function addLog(who: string, msg: LogMessage) {
-  const li = document.createElement('li');
-  const name = document.createElement('b');
-  name.textContent = who;
-  li.append(name);
-  if (msg.type === 'chat') {
-    li.append(`: ${msg.text.slice(0, 500)}`);
-  } else {
-    li.className = 'roll';
-    li.append(` rolled d${msg.sides}: `);
-    const n = document.createElement('span');
-    n.textContent = String(msg.result);
-    if (msg.result === msg.sides) n.className = 'max';
-    if (msg.result === 1) n.className = 'min';
-    li.append(n);
+async function act(op: Parameters<GameClient['send']>[0]) {
+  try {
+    await game?.send(op);
+  } catch (e) {
+    note((e as Error).message);
   }
-  log.append(li);
-  log.scrollTop = log.scrollHeight;
-}
-
-/** Local-only notice in the log (not sent to the table). */
-function note(text: string) {
-  const li = document.createElement('li');
-  li.className = 'note';
-  li.textContent = text;
-  log.append(li);
-  log.scrollTop = log.scrollHeight;
-}
-
-function sendLog(msg: LogMessage) {
-  if (!session) return;
-  session.send(msg);
-  addLog(session.selfName, msg); // data messages aren't echoed to the sender
-}
-
-function roll(sides: number) {
-  const buf = new Uint32Array(1);
-  crypto.getRandomValues(buf);
-  return (buf[0] % sides) + 1;
 }
 
 $('#dice').addEventListener('click', (e) => {
-  const sides = Number((e.target as HTMLElement).dataset.sides);
-  if (sides) sendLog({ type: 'roll', sides, result: roll(sides) });
+  const expr = (e.target as HTMLElement).dataset.expr;
+  if (expr) void act({ kind: 'roll', expr });
+});
+
+$<HTMLFormElement>('#roll-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const input = (e.target as HTMLFormElement).elements.namedItem('expr') as HTMLInputElement;
+  if (input.value.trim()) void act({ kind: 'roll', expr: input.value.trim() });
 });
 
 $<HTMLFormElement>('#chat-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const input = (e.target as HTMLFormElement).elements.namedItem('text') as HTMLInputElement;
   const text = input.value.trim();
-  if (text) sendLog({ type: 'chat', text });
   input.value = '';
+  if (text) void act({ kind: 'chat', text });
 });
 
-// ---- Devices ------------------------------------------------------------------------------
+gmBtn.addEventListener('click', () => {
+  void act({ kind: 'gm', seat: game?.state?.gm === me ? null : me });
+});
+
+$('#undo-btn').addEventListener('click', () => void act({ kind: 'undo' }));
+
+// ---- Devices --------------------------------------------------------------------------------
 
 function fillSelect(select: HTMLSelectElement, devices: MediaDeviceInfo[], preferred: string) {
   select.replaceChildren(
@@ -240,138 +314,83 @@ camBtn.addEventListener('click', async () => {
 $('#leave-btn').addEventListener('click', () => void session?.leave());
 
 $('#copy-link').addEventListener('click', async (e) => {
-  const url = `${location.origin}${location.pathname}?room=${encodeURIComponent(fields.room.value.toLowerCase())}`;
+  const url = `${location.origin}${location.pathname}?room=${encodeURIComponent(roomId)}`;
   await navigator.clipboard.writeText(url);
   (e.target as HTMLButtonElement).textContent = 'Copied!';
   setTimeout(() => ((e.target as HTMLButtonElement).textContent = 'Copy invite link'), 1500);
 });
 
-// ---- Join / leave -------------------------------------------------------------------------
+// ---- Enter / leave --------------------------------------------------------------------------
 
-/** Ask for mic (and camera) permission up front so device ids and labels are available. */
-async function getPermissions(wantCamera: boolean): Promise<{ camera: boolean; cameraError?: Error }> {
-  let stream: MediaStream;
-  let cameraError: Error | undefined;
+function leftRoom(reason: string) {
+  session = null;
+  game?.close();
+  game = null;
+  cards.clear();
+  stage.replaceChildren();
+  clearLog();
+  roomView.hidden = true;
+  lobby.hidden = false;
+  history.replaceState(null, '', location.pathname);
+  if (reason !== 'Left') showLobbyError(`Disconnected: ${reason}`);
+  void loadRooms();
+}
+
+async function enterRoom(id: string, button: HTMLButtonElement) {
+  if (!whoForm.reportValidity()) return;
+  showLobbyError('');
+  button.disabled = true;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: wantCamera });
-  } catch (e) {
-    if (!wantCamera) throw e;
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true }); // mic is fine; the camera is the problem
-    cameraError = (await probeCamera()) ?? (e as Error);
-  }
-  stream.getTracks().forEach((t) => t.stop());
-  return { camera: wantCamera && !cameraError, cameraError };
-}
+    const perms = await getPermissions(who.camera.checked).catch((e: Error) => e);
+    if (perms instanceof Error) return showLobbyError(micError(perms));
 
-/** Try the camera on its own; returns the error, or null if it opens. */
-async function probeCamera(): Promise<Error | null> {
-  try {
-    const s = await navigator.mediaDevices.getUserMedia({ video: true });
-    s.getTracks().forEach((t) => t.stop());
-    return null;
-  } catch (e) {
-    return e as Error;
-  }
-}
-
-function cameraError(e: Error) {
-  switch (e.name) {
-    case 'NotAllowedError':
-      return 'Camera blocked. Allow it with the icon left of the address bar (and in Windows Settings → Privacy & security → Camera), then rejoin.';
-    case 'NotFoundError':
-      return 'No camera found. Check it is plugged in and enabled in your OS.';
-    case 'NotReadableError':
-      return 'Camera is busy. Close other apps using it (Teams, Zoom, Discord, OBS, another browser tab), then rejoin.';
-    default:
-      return `Camera problem (${e.name}: ${e.message}).`;
-  }
-}
-
-function pick(devices: MediaDeviceInfo[], kind: MediaDeviceKind, preferred: string) {
-  const ofKind = devices.filter((d) => d.kind === kind);
-  return (ofKind.find((d) => d.deviceId === preferred) ?? ofKind[0])?.deviceId;
-}
-
-/** getUserMedia failures look alike to players; say which one it was. */
-function micError(e: Error) {
-  switch (e.name) {
-    case 'NotAllowedError':
-      return 'Microphone blocked. Allow it with the icon left of the address bar (and check your OS privacy settings), then try again.';
-    case 'NotFoundError':
-      return 'No microphone found. Plug one in or check that your OS sees it.';
-    case 'NotReadableError':
-      return 'Your microphone is busy or blocked by the OS (another app using it, or OS privacy settings).';
-    default:
-      return `Couldn't open your microphone (${e.name}: ${e.message}).`;
-  }
-}
-
-function showError(msg: string) {
-  joinError.textContent = msg;
-  joinError.hidden = false;
-}
-
-joinForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  joinError.hidden = true;
-  const submit = joinForm.querySelector('button')!;
-  submit.disabled = true;
-  try {
-    const room = fields.room.value.trim().toLowerCase();
-    const name = fields.name.value.trim();
-    const key = fields.key.value;
-
-    const perms = await getPermissions(fields.camera.checked).catch((e: Error) => e);
-    if (perms instanceof Error) return showError(micError(perms));
-
-    const res = await fetch('/api/join', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ room, name, key }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) return showError(body.error ?? `Join failed (${res.status}).`);
-
-    prefs.set('room', room);
-    prefs.set('name', name);
-    prefs.set('key', key);
+    const join = await joinRoom(who.key.value, id, who.name.value.trim());
+    me = join.name;
+    roomId = join.room.id;
 
     const devices = await navigator.mediaDevices.enumerateDevices();
     const cameraId = perms.camera ? pick(devices, 'videoinput', prefs.get('cam')) : undefined;
-
     muted = false;
     cameraOn = !!cameraId;
-    session = await joinChime(body as JoinInfo, {
+
+    game = new GameClient(join.wsUrl, join.token, {
+      snapshot: (state, log) => {
+        renderState(state);
+        resetLog(log, state);
+      },
+      op: (entry, state) => {
+        renderState(state);
+        addEntry(entry, state);
+      },
+      status: (connected) => ($('#conn-status').hidden = connected),
+      error: (message) => note(message),
+    });
+
+    session = await joinChime(join, {
       roster: renderRoster,
       tileUpdated: renderTile,
       tileRemoved: removeTile,
-      message: (from, data) => isLogMessage(data) && addLog(from, data),
-      ended: (reason) => {
-        session = null;
-        cards.clear();
-        stage.replaceChildren();
-        log.replaceChildren();
-        roomView.hidden = true;
-        joinView.hidden = false;
-        if (reason !== 'Left') showError(`Disconnected: ${reason}`);
-      },
+      message: () => {}, // unused for now; game actions go over the game channel
+      ended: leftRoom,
     }, {
       micId: pick(devices, 'audioinput', prefs.get('mic')),
       cameraId,
       speakerId: pick(devices, 'audiooutput', prefs.get('spk')),
     });
 
-    $('#room-name').textContent = room;
-    history.replaceState(null, '', `?room=${encodeURIComponent(room)}`);
-    joinView.hidden = true;
+    $('#room-name').textContent = join.room.name;
+    history.replaceState(null, '', `?room=${encodeURIComponent(roomId)}`);
+    lobby.hidden = true;
     roomView.hidden = false;
     renderControls();
     await refreshDevices();
     if (perms.cameraError) note(cameraError(perms.cameraError));
   } catch (err) {
     console.error(err);
-    showError(`Something went wrong: ${(err as Error).message}`);
+    game?.close();
+    game = null;
+    showLobbyError(`Something went wrong: ${(err as Error).message}`);
   } finally {
-    submit.disabled = false;
+    button.disabled = false;
   }
-});
+}

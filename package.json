@@ -1,10 +1,15 @@
 {
   "name": "pac-vtt",
   "private": true,
-  "workspaces": ["infra", "web"],
+  "type": "module",
+  "workspaces": [
+    "infra",
+    "web"
+  ],
   "scripts": {
     "dev": "npm run dev -w web",
     "build": "npm run build -w web",
+    "test": "tsx --test shared/*.test.ts",
     "typecheck": "npm run typecheck -w infra && npm run typecheck -w web",
     "deploy": "npm run build -w web && npm run cdk -w infra -- deploy --all --require-approval never",
     "diff": "npm run cdk -w infra -- diff --all"

@@ -27,7 +27,8 @@ export interface AvEvents {
   roster(participants: Participant[]): void;
   tileUpdated(tile: VideoTile): void;
   tileRemoved(tileId: number): void;
-  /** Small real-time messages from other participants (not echoed back to the sender). */
+  /** Small, unsaved real-time messages from other participants (not echoed back to the sender).
+   *  Durable game actions go over the game-state channel instead (game.ts). */
   message(fromName: string, data: unknown): void;
   ended(reason: string): void;
 }

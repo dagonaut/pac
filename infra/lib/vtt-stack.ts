@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { CfnOutput, Duration, Fn, RemovalPolicy, Stack, type StackProps } from 'aws-cdk-lib';
-import { CfnStage, HttpApi, HttpMethod } from 'aws-cdk-lib/aws-apigatewayv2';
-import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { CfnStage, HttpApi, HttpMethod, WebSocketApi, WebSocketStage } from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpLambdaIntegration, WebSocketLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import type { ICertificate } from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import { HttpOrigin, S3BucketOrigin } from 'aws-cdk-lib/aws-cloudfront-origins';
@@ -34,7 +34,7 @@ export class VttStack extends Stack {
   constructor(scope: Construct, id: string, props: VttStackProps = {}) {
     super(scope, id, props);
 
-    // ---- Join API -------------------------------------------------------------------------
+    // ---- Tables ---------------------------------------------------------------------------
 
     // room -> current Chime meeting id
     const rooms = new dynamodb.TableV2(this, 'Rooms', {
@@ -50,27 +50,69 @@ export class VttStack extends Stack {
       generateSecretString: { excludePunctuation: true, passwordLength: 16 },
     });
 
-    const joinFn = new NodejsFunction(this, 'JoinFn', {
-      entry: path.join(import.meta.dirname, '../lambda/join.ts'),
-      runtime: Runtime.NODEJS_22_X,
-      architecture: Architecture.ARM_64,
-      memorySize: 256,
-      timeout: Duration.seconds(10),
-      environment: {
-        ROOMS_TABLE: rooms.tableName,
-        TABLE_KEY_SECRET_ARN: tableKey.secretArn,
-        CHIME_CONTROL_REGION: CHIME_CONTROL_REGIONS.includes(this.region) ? this.region : 'us-east-1',
-        CHIME_MEDIA_REGION: this.region,
-      },
-      bundling: { minify: true, sourceMap: true },
-      logGroup: new LogGroup(this, 'JoinFnLogs', {
-        retention: RetentionDays.ONE_MONTH,
-        removalPolicy: RemovalPolicy.DESTROY,
-      }),
+    // Game state. Keys:
+    //   room#<id> / state           the room's RoomState (JSON) + seq and lobby summary fields
+    //   room#<id> / log#<seq>       one applied op (+ its inverse for undo)
+    //   room#<id> / conn#<connId>   a WebSocket connection in the room (TTL)
+    //   conn#<connId> / conn        connection -> room lookup for $disconnect (TTL)
+    const game = new dynamodb.TableV2(this, 'Game', {
+      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
+      billing: dynamodb.Billing.onDemand(),
+      timeToLiveAttribute: 'ttl',
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true }, // campaigns live here
+      removalPolicy: RemovalPolicy.RETAIN,
     });
-    rooms.grantReadWriteData(joinFn);
-    tableKey.grantRead(joinFn);
-    joinFn.addToRolePolicy(
+
+    const fn = (id: string, entry: string, environment: Record<string, string>) =>
+      new NodejsFunction(this, id, {
+        entry: path.join(import.meta.dirname, '../lambda', entry),
+        runtime: Runtime.NODEJS_22_X,
+        architecture: Architecture.ARM_64,
+        memorySize: 256,
+        timeout: Duration.seconds(10),
+        environment: { GAME_TABLE: game.tableName, TABLE_KEY_SECRET_ARN: tableKey.secretArn, ...environment },
+        bundling: { minify: true, sourceMap: true },
+        logGroup: new LogGroup(this, `${id}Logs`, {
+          retention: RetentionDays.ONE_MONTH,
+          removalPolicy: RemovalPolicy.DESTROY,
+        }),
+      });
+
+    // ---- Game-state WebSocket ---------------------------------------------------------------
+
+    const wsFn = fn('WsFn', 'ws.ts', {});
+    game.grantReadWriteData(wsFn);
+    tableKey.grantRead(wsFn);
+
+    const wsIntegration = new WebSocketLambdaIntegration('WsIntegration', wsFn);
+    const wsApi = new WebSocketApi(this, 'WsApi', {
+      apiName: 'pac-vtt-ws',
+      routeSelectionExpression: '$request.body.type',
+      connectRouteOptions: { integration: wsIntegration },
+      disconnectRouteOptions: { integration: wsIntegration },
+      defaultRouteOptions: { integration: wsIntegration },
+    });
+    const wsStage = new WebSocketStage(this, 'WsStage', {
+      webSocketApi: wsApi,
+      stageName: 'live',
+      autoDeploy: true,
+      throttle: { burstLimit: 50, rateLimit: 25 },
+    });
+    wsApi.grantManageConnections(wsFn);
+
+    // ---- HTTP API (rooms + join) ------------------------------------------------------------
+
+    const apiFn = fn('ApiFn', 'api.ts', {
+      ROOMS_TABLE: rooms.tableName,
+      WS_URL: wsStage.url,
+      CHIME_CONTROL_REGION: CHIME_CONTROL_REGIONS.includes(this.region) ? this.region : 'us-east-1',
+      CHIME_MEDIA_REGION: this.region,
+    });
+    rooms.grantReadWriteData(apiFn);
+    game.grantReadWriteData(apiFn);
+    tableKey.grantRead(apiFn);
+    apiFn.addToRolePolicy(
       new PolicyStatement({
         actions: ['chime:CreateMeeting', 'chime:GetMeeting', 'chime:DeleteMeeting', 'chime:CreateAttendee'],
         resources: ['*'],
@@ -78,11 +120,10 @@ export class VttStack extends Stack {
     );
 
     const api = new HttpApi(this, 'Api', { apiName: 'pac-vtt-api' });
-    api.addRoutes({
-      path: '/api/join',
-      methods: [HttpMethod.POST],
-      integration: new HttpLambdaIntegration('JoinIntegration', joinFn),
-    });
+    const apiIntegration = new HttpLambdaIntegration('ApiIntegration', apiFn);
+    for (const p of ['/api/join', '/api/rooms', '/api/rooms/create']) {
+      api.addRoutes({ path: p, methods: [HttpMethod.POST], integration: apiIntegration });
+    }
     // Cheap guard against someone hammering the endpoint.
     (api.defaultStage!.node.defaultChild as CfnStage).defaultRouteSettings = {
       throttlingBurstLimit: 20,
