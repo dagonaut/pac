@@ -36,8 +36,13 @@ function equal(a: string, b: string): boolean {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
+/** Forgiving about typing: capitals, spaces, dashes and other punctuation don't matter, so
+ *  "Wizard Bone Teeth" matches "wizard-bone-teeth". */
+const normalizeKey = (k: string) => k.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
 export async function keyMatches(given: unknown): Promise<boolean> {
-  return equal(String(given ?? ''), await tableKey());
+  const expected = normalizeKey(await tableKey());
+  return expected.length > 0 && equal(normalizeKey(String(given ?? '')), expected);
 }
 
 // Session tokens are signed with a key derived from the table key, so rotating the table key
