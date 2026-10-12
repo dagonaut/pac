@@ -174,6 +174,44 @@ await ana.keyboard.press('Escape');
 await ana.keyboard.press('Control+z');
 await bo.waitForSelector('svg.ink path[data-stroke]', { state: 'attached' });
 
+// ---- Images: hidden upload, set as map, spotlight, put on table ---------------------------------
+await ana.keyboard.press('Escape'); // back to the Move tool
+await ana.click('.drawer-tab');
+await ana.click('.drawer-head button:text-is("Upload")');
+await ana.setInputFiles('dialog.import input[type=file] >> nth=0', image);
+await ana.selectOption('dialog.import select', 'map');
+await ana.check('dialog.import input[type=checkbox]');
+await ana.click('dialog.import button[type=submit]');
+await ana.waitForSelector('.image-grid figure.hidden-image');
+await bo.click('.drawer-tab');
+await bo.waitForSelector('.drawer:not([hidden])');
+assert.equal(await bo.locator('.image-grid figure').count(), 0, 'Bo cannot see the hidden image');
+
+await ana.click('.image-grid .thumb');
+await ana.click('.menu .menu-item:text-is("Set as map")');
+await bo.waitForFunction(() => {
+  const m = document.querySelector('img.map') as HTMLImageElement | null;
+  return !!m && !m.hidden && m.naturalWidth > 0;
+});
+await bo.waitForSelector('.image-grid figure:not(.hidden-image)'); // setting the map revealed it
+await untilLog(bo, 'set the map to');
+
+await ana.click('.image-grid .thumb');
+await ana.click('.menu .menu-item:text-is("Show to everyone")');
+await bo.waitForSelector('.spotlight:not([hidden]):not(.local) img');
+await shot(bo, '08-bo-sees-spotlight');
+await bo.click('.spotlight button:text-is("Minimize")');
+await bo.waitForSelector('.spot-chip:not([hidden])');
+await ana.click('.spotlight button:text-is("Close for everyone")');
+await bo.waitForSelector('.spot-chip', { state: 'hidden' });
+
+await ana.click('.image-grid .thumb');
+const before = await ana.locator('.table-surface .piece').count();
+await ana.click('.menu .menu-item:text-is("Put on the table")');
+await ana.waitForFunction((n) => document.querySelectorAll('.table-surface .piece').length === n + 1, before);
+await ana.click('.drawer-close');
+await shot(ana, '09-map-and-handout');
+
 // Dice + chat still work.
 await bo.fill('#roll-form input', '2d6+1');
 await bo.click('#roll-form button');

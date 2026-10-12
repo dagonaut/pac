@@ -214,6 +214,31 @@ test('importing a batch of cards undoes completely', () => {
   assert.deepEqual(s, before);
 });
 
+test('images: create/update/delete reverse; maps and spotlight need library images', () => {
+  const s = room();
+  const img = { id: 'im1', name: 'Dungeon', src: '/assets/r/dungeon.png', kind: 'map' as const, hidden: true, by: 'Ana' };
+  roundTrip(s, { kind: 'image.create', image: img });
+  apply(s, { kind: 'image.create', image: img });
+  roundTrip(s, { kind: 'image.update', id: 'im1', set: { hidden: false, name: 'Crypt' } });
+  roundTrip(s, { kind: 'zone.map', id: 'board', map: { image: 'im1', scale: 1.5 } });
+  apply(s, { kind: 'zone.map', id: 'board', map: { image: 'im1', scale: 1 } });
+  roundTrip(s, { kind: 'zone.map', id: 'board', map: null });
+  assert.throws(() => apply(s, { kind: 'image.delete', id: 'im1' }), /in use/);
+  roundTrip(s, { kind: 'spotlight', spotlight: { image: 'im1', by: 'Ana' } });
+  apply(s, { kind: 'zone.map', id: 'board', map: null });
+  roundTrip(s, { kind: 'image.delete', id: 'im1' });
+  for (const bad of [
+    { kind: 'zone.map', id: 'row', map: { image: 'im1', scale: 1 } },
+    { kind: 'zone.map', id: 'board', map: { image: 'nope', scale: 1 } },
+    { kind: 'zone.map', id: 'board', map: { image: 'im1', scale: 99 } },
+    { kind: 'spotlight', spotlight: { image: 'nope', by: 'Ana' } },
+    { kind: 'image.create', image: { ...img, id: 'im2', src: 'https://evil.example/x.png' } },
+    { kind: 'image.create', image: { ...img, id: 'im3', kind: 'poster' } },
+    { kind: 'image.create', image: { ...img, id: '__proto__' } },
+    { kind: 'image.update', id: '__proto__', set: { hidden: false } },
+  ] as Op[]) assert.throws(() => apply(structuredClone(s), bad), OpError, JSON.stringify(bad));
+});
+
 test('security: reserved ids and keys never reach Object.prototype', () => {
   const s = room();
   const attempts: Op[] = [

@@ -45,10 +45,29 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
       return `changed ${card(op.id)}`;
     }
     case 'draw': return `drew ${op.count} from ${zone(op.from)} to ${zone(op.to)}`;
+    case 'image.create': return op.image.hidden ? 'uploaded a hidden image' : `uploaded ${op.image.name}`;
+    case 'image.update': {
+      const img = state.images?.[op.id];
+      const name = img && (!img.hidden || state.gm === me || img.by === me) ? img.name : 'an image';
+      if (op.set.hidden === false) return `revealed ${name}`;
+      if (op.set.hidden === true) return 'hid an image';
+      return op.set.name ? `renamed an image to ${op.set.name}` : `changed ${name}`;
+    }
+    case 'image.delete': return 'deleted an image';
+    case 'zone.map': return op.map ? `set the map to ${state.images?.[op.map.image]?.name ?? 'an image'}` : 'removed the map';
+    case 'spotlight': return op.spotlight ? `is showing ${state.images?.[op.spotlight.image]?.name ?? 'an image'}` : 'closed the image on screen';
     case 'stroke.add': return 'drew on the table';
     case 'stroke.delete': return 'erased a drawing';
     case 'batch': {
       if (op.ops.length && op.ops.every((o) => o.kind === 'stroke.delete')) return `cleared ${op.ops.length} drawing${op.ops.length === 1 ? '' : 's'}`;
+      if (op.ops.length && op.ops.every((o) => o.kind === 'image.create')) return `uploaded ${op.ops.length} image${op.ops.length === 1 ? '' : 's'}`;
+      // An image reveal plus the action that used it (map, spotlight, put on table): describe the action.
+      if (op.ops.some((o) => o.kind === 'image.update')) {
+        const main = op.ops.filter((o) => o.kind !== 'image.update' && o.kind !== 'card.create');
+        if (main.length === 1) return describe(main[0], state, me, names);
+      }
+      const fromImage = op.ops.find((o) => o.kind === 'card.create' && o.card.id.startsWith('card-img-'));
+      if (fromImage && fromImage.kind === 'card.create') return `put ${fromImage.card.name} on the table`;
       const imported = op.ops.filter((o) => o.kind === 'card.create').length;
       if (imported) return `imported ${imported} card${imported === 1 ? '' : 's'}`;
       return `moved ${op.ops.length} cards`;

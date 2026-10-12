@@ -16,6 +16,19 @@ export interface Zone {
   slots?: string[];
   /** Free-form values shown with the zone, e.g. a sheet's HP or Charge. */
   fields?: Record<string, string>;
+  /** Background image for a board zone (an entry in RoomState.images), drawn under everything. */
+  map?: { image: string; scale: number };
+}
+
+/** A map or handout in the room's image library. */
+export interface ImageDef {
+  id: string;
+  name: string;
+  src: string;
+  kind: 'map' | 'handout';
+  /** Only the GM seat and the uploader see it in the drawer until it's revealed (honor system). */
+  hidden: boolean;
+  by: string;
 }
 
 /** Imported card art. `back` falls back to the deck's back; `upgraded` replaces the front. */
@@ -74,6 +87,10 @@ export interface RoomState {
   cards: Record<string, CardDef>;
   /** Drawings on the table. Optional: rooms created before drawing existed don't have it. */
   strokes?: Record<string, Stroke>;
+  /** Image library (maps, handouts). Optional for older rooms. */
+  images?: Record<string, ImageDef>;
+  /** The image currently shown big on everyone's screen. */
+  spotlight?: { image: string; by: string } | null;
 }
 
 export interface DiceTerm {
@@ -106,6 +123,13 @@ export type Op =
   | { kind: 'piece.update'; id: string; set: Partial<PieceProps> }
   /** Draw `count` random pieces from a deck; the server fills in `ids`. */
   | { kind: 'draw'; from: string; to: string; count: number; ids?: string[] }
+  | { kind: 'image.create'; image: ImageDef }
+  | { kind: 'image.update'; id: string; set: { name?: string; kind?: 'map' | 'handout'; hidden?: boolean } }
+  /** Only for images not in use as a map or spotlight. */
+  | { kind: 'image.delete'; id: string }
+  /** Set (or clear, with null) a board zone's background map. */
+  | { kind: 'zone.map'; id: string; map: { image: string; scale: number } | null }
+  | { kind: 'spotlight'; spotlight: { image: string; by: string } | null }
   | { kind: 'stroke.add'; stroke: Stroke }
   | { kind: 'stroke.delete'; id: string }
   | { kind: 'batch'; ops: Op[] }
@@ -124,5 +148,5 @@ export interface LogEntry {
 }
 
 export function emptyRoom(id: string, name: string, system: string): RoomState {
-  return { id, name, system, created: new Date().toISOString(), seq: 0, gm: null, zones: {}, pieces: {}, cards: {}, strokes: {} };
+  return { id, name, system, created: new Date().toISOString(), seq: 0, gm: null, zones: {}, pieces: {}, cards: {}, strokes: {}, images: {}, spotlight: null };
 }

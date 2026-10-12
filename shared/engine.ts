@@ -14,6 +14,7 @@ const MAX_STROKE_POINTS = 500;
 const MAX_ZONES = 100;
 const MAX_CARDS = 2000;
 const MAX_PIECES = 3000;
+const MAX_IMAGES = 500;
 
 export class OpError extends Error {}
 
@@ -36,7 +37,19 @@ function own<T>(rec: Record<string, T> | undefined, id: unknown): T | undefined 
 const isArt = (v: unknown, state: RoomState) =>
   typeof v === 'string' && v.length <= 300 && v.startsWith(`/assets/${state.id}/`) && /^\/assets\/[a-z0-9-]+\/[\w-]+\.(png|jpg|webp|gif|avif)$/.test(v);
 
-const ZONE_KEYS = new Set(['id', 'kind', 'label', 'owner', 'slots', 'fields']);
+const ZONE_KEYS = new Set(['id', 'kind', 'label', 'owner', 'slots', 'fields', 'map']);
+
+function checkMap(m: unknown, state: RoomState) {
+  const map = m as { image?: unknown; scale?: unknown };
+  if (!map || typeof map !== 'object' || Object.keys(map).some((k) => k !== 'image' && k !== 'scale')) fail('Bad map.');
+  if (!own(state.images, map.image)) fail('That map image is not in the library.');
+  if (!isNum(map.scale) || map.scale < 0.1 || map.scale > 10) fail('Map size must be between 10% and 1000%.');
+}
+
+/** Is an image in use (as a map or the spotlight)? Those can't be deleted. */
+function imageInUse(state: RoomState, id: string) {
+  return state.spotlight?.image === id || Object.values(state.zones).some((z) => z.map?.image === id);
+}
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 function checkZone(z: Zone) {
@@ -47,6 +60,7 @@ function checkZone(z: Zone) {
   if (!isText(z.label, 80)) fail('Zone label is too long.');
   if (z.owner !== undefined && !isText(z.owner, 40)) fail('Bad zone owner.');
   if (z.slots !== undefined) checkSlots(z.slots);
+  if (z.map !== undefined && z.kind !== 'board') fail('Only a table can have a map.');
   if (z.fields !== undefined) {
     if (!z.fields || typeof z.fields !== 'object' || Object.keys(z.fields).length > MAX_FIELDS) fail('Too many fields.');
     for (const [k, v] of Object.entries(z.fields)) checkField(k, v);
@@ -173,6 +187,7 @@ export function apply(state: RoomState, op: Op): Op | null {
 
     case 'zone.create':
       checkZone(op.zone);
+      if (op.zone.map !== undefined) checkMap(op.zone.map, state);
       if (Object.keys(state.zones).length >= MAX_ZONES) fail(`A room holds at most ${MAX_ZONES} zones.`);
       if (own(state.zones, op.zone.id)) fail(`Zone ${op.zone.id} already exists.`);
       state.zones[op.zone.id] = { ...op.zone };
@@ -294,6 +309,61 @@ export function apply(state: RoomState, op: Op): Op | null {
         Object.assign(p, { zone: op.to, index: nextIndex(state, op.to), faceUp: to.kind !== 'deck' });
       }
       return { kind: 'batch', ops: undo.reverse() };
+    }
+
+    case 'image.create': {
+      const img = op.image;
+      const images = (state.images ??= {});
+      if (!img || typeof img !== 'object' || !isId(img.id) || own(images, img.id)) fail('Bad or duplicate image.');
+      const extra = Object.keys(img).find((k) => !['id', 'name', 'src', 'kind', 'hidden', 'by'].includes(k));
+      if (extra) fail(`Unknown image field ${extra}.`);
+      if (!isKey(img.name, 120)) fail('Image names are 1–120 characters.');
+      if (!isArt(img.src, state)) fail('Images must be uploaded to this room.');
+      if (img.kind !== 'map' && img.kind !== 'handout') fail('An image is a map or a handout.');
+      if (typeof img.hidden !== 'boolean' || !isText(img.by, 40)) fail('Bad image.');
+      if (Object.keys(images).length >= MAX_IMAGES) fail(`A room holds at most ${MAX_IMAGES} images.`);
+      images[img.id] = { id: img.id, name: img.name, src: img.src, kind: img.kind, hidden: img.hidden, by: img.by };
+      return { kind: 'image.delete', id: img.id };
+    }
+
+    case 'image.update': {
+      const img = own(state.images, op.id) ?? fail('No such image.');
+      if (!op.set || typeof op.set !== 'object') fail('Nothing to update.');
+      const keys = Object.keys(op.set);
+      if (!keys.length || keys.some((k) => !['name', 'kind', 'hidden'].includes(k))) fail('Only name, kind and hidden can change.');
+      if (op.set.name !== undefined && !isKey(op.set.name, 120)) fail('Image names are 1–120 characters.');
+      if (op.set.kind !== undefined && op.set.kind !== 'map' && op.set.kind !== 'handout') fail('An image is a map or a handout.');
+      if (op.set.hidden !== undefined && typeof op.set.hidden !== 'boolean') fail('Bad hidden flag.');
+      const prev = Object.fromEntries(keys.map((k) => [k, img[k as 'name' | 'kind' | 'hidden']]));
+      Object.assign(img, op.set);
+      return { kind: 'image.update', id: op.id, set: prev };
+    }
+
+    case 'image.delete': {
+      const img = own(state.images, op.id) ?? fail('No such image.');
+      if (imageInUse(state, op.id)) fail(`"${img.name}" is in use as a map or on screen.`);
+      delete state.images![op.id];
+      return { kind: 'image.create', image: img };
+    }
+
+    case 'zone.map': {
+      const zone = own(state.zones, op.id) ?? fail(`No zone ${op.id}.`);
+      if (zone.kind !== 'board') fail('Only a table can have a map.');
+      if (op.map !== null) checkMap(op.map, state);
+      const prev = zone.map ? { ...zone.map } : null;
+      if (op.map) zone.map = { image: op.map.image, scale: op.map.scale };
+      else delete zone.map;
+      return { kind: 'zone.map', id: op.id, map: prev };
+    }
+
+    case 'spotlight': {
+      const sp = op.spotlight;
+      if (sp !== null) {
+        if (!sp || typeof sp !== 'object' || !own(state.images, sp.image) || !isText(sp.by, 40)) fail('Bad spotlight.');
+      }
+      const prev = state.spotlight ?? null;
+      state.spotlight = sp ? { image: sp.image, by: sp.by } : null;
+      return { kind: 'spotlight', spotlight: prev };
     }
 
     case 'stroke.add': {

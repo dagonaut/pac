@@ -15,7 +15,8 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   if (classes.length) el.classList.add(...classes);
   for (const [k, v] of Object.entries(attrs)) {
     if (v === undefined || v === null || v === false) continue;
-    if (k === 'dataset') Object.assign(el.dataset, v);
+    if (k === 'className') el.classList.add(...String(v).split(/\s+/).filter(Boolean));
+    else if (k === 'dataset') Object.assign(el.dataset, v);
     else if (k === 'style') Object.assign(el.style, v);
     else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v as EventListener);
     else if (k in el && typeof v !== 'string') (el as unknown as Record<string, unknown>)[k] = v;

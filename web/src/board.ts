@@ -5,7 +5,9 @@ import { newPiece } from '../../shared/engine.ts';
 import type { Op, Piece, PieceProps, RoomState, Zone, ZoneKind } from '../../shared/model.ts';
 import { h, shortId } from './dom';
 import { createDrawing } from './draw';
+import { createImages } from './images';
 import { cardName, faceOf, pieceEl, prunePieceEls } from './pieces';
+import { closeMenu, heading, item, openMenu } from './menu';
 import { renderDock } from './sheets';
 import { systems } from './systems/index';
 
@@ -19,6 +21,8 @@ export interface TableCtx {
   upload(file: File): Promise<string>;
   /** Unsaved real-time message to everyone else (live drawing, pings). */
   live(data: unknown): void;
+  /** Session token, for uploads. */
+  token(): string;
 }
 
 const TABLE_W = 3200;
@@ -59,10 +63,8 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
   );
   const dock = h('div.sheet-dock');
   const preview = h('div.preview', { hidden: true });
-  const menu = h('div.menu', { hidden: true });
   const area = h('div.table-area', {}, wrap, hint, zoomBox);
   root.replaceChildren(bar, area, dock, preview);
-  document.body.append(menu);
 
   let zoom = Number(localStorage.getItem('vtt.zoom')) || 1;
   function setZoom(z: number) {
@@ -88,6 +90,17 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     live: ctx.live,
     zoom: () => zoom,
     tableZone: () => surface.dataset.zone,
+  });
+
+  const images = createImages(area, surface, {
+    me: () => ctx.me(),
+    state: () => ctx.state(),
+    act: ctx.act,
+    note: ctx.note,
+    token: ctx.token,
+    tableZone: () => surface.dataset.zone,
+    visibleCenter: () => visibleCenter(),
+    tableSize: { w: TABLE_W, h: TABLE_H },
   });
 
   const st = () => ctx.state()!;
@@ -117,39 +130,6 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
   const update = (id: string, set: Partial<PieceProps>) => ctx.act({ kind: 'piece.update', id, set });
 
   // ---- Menus ----------------------------------------------------------------------------------
-
-  function closeMenu() {
-    menu.hidden = true;
-    menu.replaceChildren();
-    if (menu.parentElement !== document.body) document.body.append(menu);
-  }
-
-  function openMenu(anchor: DOMRect, ...items: (Node | false | null | undefined)[]) {
-    menu.replaceChildren(...items.filter((i): i is Node => !!i));
-    menu.hidden = false;
-    const r = menu.getBoundingClientRect();
-    const left = Math.min(anchor.right + 6, window.innerWidth - r.width - 8);
-    const top = Math.min(anchor.top, window.innerHeight - r.height - 8);
-    menu.style.left = `${Math.max(8, left)}px`;
-    menu.style.top = `${Math.max(8, top)}px`;
-  }
-
-  document.addEventListener('pointerdown', (e) => {
-    if (!menu.hidden && !menu.contains(e.target as Node)) closeMenu();
-  });
-  document.addEventListener('keydown', (e) => e.key === 'Escape' && closeMenu());
-
-  const item = (label: string, run: () => unknown, opts: { hint?: string; danger?: boolean } = {}) =>
-    h('button.menu-item', {
-      type: 'button',
-      className: `menu-item${opts.danger ? ' danger' : ''}`,
-      onclick: () => {
-        closeMenu();
-        void run();
-      },
-    }, label, opts.hint ? h('kbd', {}, opts.hint) : null);
-
-  const heading = (text: string) => h('div.menu-heading', {}, text);
 
   function sendToItems(p: Piece) {
     const zones = Object.values(st().zones).filter((z) => z.id !== p.zone);
@@ -347,9 +327,6 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
       });
       input.click();
     };
-    // Menu sits above the modal dialog's top layer only if it's inside it.
-    const dlg = document.querySelector('dialog[open]');
-    if (dlg && menu.parentElement !== dlg) dlg.append(menu);
     openMenu(anchor,
       heading(c.name),
       heading('Add a copy to'),
@@ -642,6 +619,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
       delete surface.dataset.zone;
     }
     drawing.render(state);
+    images.render(state);
 
     renderDock(dock, state, {
       me: me(),

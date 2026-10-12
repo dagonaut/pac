@@ -7,7 +7,8 @@ Prototype, usable at the table:
 - **Audio/video**: a strip of video tiles.
 - **Cards**: bulk-import card images. Decks with random server-side draws, face-up rows, discard piles. Drag cards anywhere. Flip, tap, upgrade (with optional upgraded art), counters, notes, and a GM seat that can hide cards. A card library for adding copies.
 - **Sheets**: one per player, with named card slots and fields such as HP.
-- **Table**: pan/zoom, optional grid, resizable pieces (images and maps work too), **live drawing**, and pings.
+- **Images**: a pull-out drawer of maps and handouts per room. Upload in bulk, optionally hidden until shown. Set one as the table's background map, show one big on everyone's screen (spotlight), or put it on the table as a movable piece.
+- **Table**: pan/zoom, optional grid, resizable pieces, **live drawing**, and pings.
 - **Dice**: expressions like `2d6+3`, rolled on the server. Chat, a log of every action, and undo.
 
 ## Layout
@@ -16,7 +17,7 @@ Prototype, usable at the table:
 - `infra/`: AWS CDK app (TypeScript). CloudFront + S3 site, plus card art at `/assets/*` from a separate bucket. HTTP API (`lambda/api.ts`: rooms, join, upload URLs). WebSocket API (`lambda/ws.ts`: game state; large messages are chunked to fit API Gateway's 32 KB frames). DynamoDB. Secrets Manager.
 - `web/`: Vite + vanilla TypeScript client.
   - `src/game.ts`: game-state client (snapshot, live ops, reconnect).
-  - `src/board.ts`: the table. Zone bar, table surface, drag and drop, menus, library, preview. Also `pieces.ts` (card faces), `sheets.ts` (player sheets), `importer.ts` (bulk upload) and `draw.ts` (live drawing and pings).
+  - `src/board.ts`: the table. Zone bar, table surface, drag and drop, card/zone menus, library, preview. Also `pieces.ts` (card faces), `sheets.ts` (player sheets), `importer.ts` (bulk card upload), `images.ts` (image drawer, maps, spotlight), `draw.ts` (live drawing and pings) and `menu.ts` (the popup menu).
   - `src/av.ts`: vendor-neutral A/V interface; `src/chime-av.ts` implements it with the Amazon Chime SDK. Its data channel also carries unsaved live messages (in-progress strokes, pings).
   - `src/systems/`: game systems (plugins). See below.
 - `scripts/smoke.ts`: end-to-end check against a deployed stack (API, WebSocket, uploads, a 150-card import).

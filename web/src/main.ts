@@ -288,6 +288,7 @@ const board = createBoard($('#board'), {
   openImport: createImporter({ token: () => token, state: () => game?.state ?? null, act }),
   upload: (file) => uploadImage(token, file),
   live: (data) => session?.send(data),
+  token: () => token,
 });
 
 $('#dice').addEventListener('click', (e) => {
