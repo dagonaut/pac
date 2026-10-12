@@ -316,6 +316,28 @@ gmBtn.addEventListener('click', () => {
 
 $('#undo-btn').addEventListener('click', () => void act({ kind: 'undo' }));
 
+// ---- Chat & dice panel toggle ---------------------------------------------------------------
+
+const sideTab = $<HTMLButtonElement>('#side-tab');
+let unread = 0;
+function setSide(collapsed: boolean) {
+  roomView.classList.toggle('side-collapsed', collapsed);
+  sideTab.title = collapsed ? 'Show chat and dice' : 'Hide chat and dice';
+  if (!collapsed) unread = 0;
+  if (unread) sideTab.dataset.unread = String(unread);
+  else delete sideTab.dataset.unread;
+  prefs.set('sideCollapsed', collapsed ? '1' : '');
+}
+sideTab.addEventListener('click', () => setSide(!roomView.classList.contains('side-collapsed')));
+setSide(prefs.get('sideCollapsed') === '1');
+
+/** Count chat and rolls from others while the panel is hidden. */
+function countUnread(kind: string, by: string) {
+  if (!roomView.classList.contains('side-collapsed') || by === me || (kind !== 'chat' && kind !== 'roll')) return;
+  unread++;
+  sideTab.dataset.unread = String(unread);
+}
+
 // ---- Devices --------------------------------------------------------------------------------
 
 function fillSelect(select: HTMLSelectElement, devices: MediaDeviceInfo[], preferred: string) {
@@ -433,6 +455,7 @@ async function enterRoom(id: string, button: HTMLButtonElement) {
         renderState(state);
         board.render(state);
         addEntry(entry, state, me);
+        countUnread(entry.op.kind, entry.by);
       },
       status: (connected) => ($('#conn-status').hidden = connected),
       error: (message) => note(message),

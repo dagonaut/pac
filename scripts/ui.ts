@@ -217,6 +217,17 @@ await bo.fill('#roll-form input', '2d6+1');
 await bo.click('#roll-form button');
 await untilLog(ana, 'rolled 2d6+1');
 
+// Chat & dice panel: hide it, get an unread count, show it again.
+await bo.click('#side-tab');
+await bo.waitForSelector('#side', { state: 'hidden' });
+await ana.fill('#chat-form input', 'are you there?');
+await ana.click('#chat-form button');
+await bo.waitForSelector('#side-tab[data-unread="1"]');
+await shot(bo, '10-side-collapsed');
+await bo.click('#side-tab');
+await bo.waitForSelector('#side', { state: 'visible' });
+assert.equal(await bo.locator('#side-tab').getAttribute('data-unread'), null);
+
 const archived = await fetch(`${site}/api/rooms/archive`, {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, room: roomId, archived: true }),
 });

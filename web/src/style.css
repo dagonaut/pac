@@ -209,6 +209,7 @@ button.danger {
 /* ---- Room ---- */
 
 #room-view {
+  position: relative;
   height: 100vh;
   display: grid;
   grid-template: auto auto 1fr auto / 1fr 320px;
@@ -386,7 +387,54 @@ form.inline input {
   max-width: 200px;
 }
 
+/* Chat & dice panel can be tucked away to give the table the full width. */
+#room-view.side-collapsed {
+  grid-template-columns: 1fr 0;
+}
+
+#room-view.side-collapsed #side {
+  display: none;
+}
+
+#side-tab {
+  position: absolute;
+  right: 320px;
+  top: 50%;
+  transform: translateY(-50%);
+  writing-mode: vertical-rl;
+  z-index: 7;
+  padding: 10px 4px;
+  border-radius: 6px 0 0 6px;
+  background: var(--panel);
+  font-size: 0.85rem;
+}
+
+#room-view.side-collapsed #side-tab {
+  right: 0;
+}
+
+#side-tab[data-unread]::after {
+  content: attr(data-unread);
+  writing-mode: horizontal-tb;
+  display: block;
+  margin-top: 6px;
+  min-width: 1.4em;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #1b150e;
+  font-weight: 700;
+  text-align: center;
+}
+
 @media (max-width: 800px) {
+  #side-tab {
+    display: none;
+  }
+
+  #room-view.side-collapsed #side {
+    display: flex;
+  }
+
   #room-view {
     height: auto;
     min-height: 100vh;
