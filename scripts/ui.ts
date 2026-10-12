@@ -4,7 +4,7 @@
 // Defaults: http://localhost:5173 (run `VTT_SITE_URL=https://vtt.16watt.com npm run dev`),
 // the first image in images/, and ./ui-shots. Archives its room "zz-ui-<time>" at the end.
 import assert from 'node:assert/strict';
-import { mkdirSync, readdirSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium, type Page } from 'playwright';
 
@@ -99,25 +99,60 @@ assert.match(await log(bo), /imported/);
 
 // ---- Sheets: Ana creates hers and slots the card as a weapon ----------------------------------
 await ana.click('text=Create my sheet');
-await ana.waitForSelector('.sheet .slot[data-slot="0"]');
+await ana.click('.menu .menu-item:text-is("Example raider")'); // the Example system ships this template
+await ana.waitForSelector('.sheet-t .slot[data-slot="0"]');
 await ana.locator('.table-surface .piece').hover();
 await ana.keyboard.press('f'); // face up again
 await ana.waitForSelector('.table-surface .piece:not(.face-down)');
 const from = (await ana.locator('.table-surface .piece').boundingBox())!;
-const slot = (await ana.locator('.sheet .slot[data-slot="0"]').boundingBox())!;
+const slot = (await ana.locator('.sheet-t .slot[data-slot="0"]').boundingBox())!;
 await ana.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
 await ana.mouse.down();
 await ana.mouse.move(slot.x + slot.width / 2, slot.y + slot.height / 2, { steps: 12 });
 await ana.mouse.up();
-await ana.waitForSelector('.sheet .slot[data-slot="0"] .piece');
+await ana.waitForSelector('.sheet-t .slot[data-slot="0"] .piece');
 
 // HP + then undo.
-const hp = ana.locator('.field:has(label:text-is("HP"))');
+const hp = ana.locator('.sf:has(label:text-is("HP"))');
 await hp.locator('button:text-is("+")').click();
-await ana.waitForFunction(() => (document.querySelector('.field input[data-field$="/HP"]') as HTMLInputElement)?.value === '11');
+await ana.waitForFunction(() => (document.querySelector('input[data-field$="/hp"]') as HTMLInputElement)?.value === '11');
 await ana.keyboard.press('Control+z');
-await ana.waitForFunction(() => (document.querySelector('.field input[data-field$="/HP"]') as HTMLInputElement)?.value === '10');
+await ana.waitForFunction(() => (document.querySelector('input[data-field$="/hp"]') as HTMLInputElement)?.value === '10');
+
+// Click a stat to roll it with its modifier; fill a harm track.
+await ana.click('.stat-roll:has-text("INT")');
+await untilLog(ana, 'rolled INT (2d6+2)');
+await ana.locator('.sf-track .track-box').nth(1).click();
+await ana.waitForFunction(() => document.querySelectorAll('.sf-track .track-box.filled').length === 2);
 await shot(ana, '05-sheet');
+
+// Templates: build one, export it, import it back.
+await ana.click('.dock-tab:text-is("Templates")');
+await ana.waitForSelector('dialog.templates .template-list li:has-text("Example raider")');
+await ana.click('dialog.templates button:text-is("New template")');
+await ana.waitForSelector('dialog.template-editor');
+await ana.fill('dialog.template-editor .builder > label.opt input', 'Test hero');
+await ana.click('dialog.template-editor .add-row button:text-is("+ Field")');
+const newRow = ana.locator('dialog.template-editor .field-row').last();
+await newRow.locator('.field-main input').first().fill('Luck');
+await newRow.locator('.field-main select').selectOption('die');
+await ana.waitForSelector('dialog.template-editor .preview-box .stat-roll:has-text("Luck")');
+await shot(ana, '05c-template-builder');
+await ana.click('dialog.template-editor button:text-is("Create template")');
+await ana.waitForSelector('dialog.templates .template-list li:has-text("Test hero")');
+const [download] = await Promise.all([
+  ana.waitForEvent('download'),
+  ana.click('dialog.templates li:has-text("Test hero") button:text-is("Export")'),
+]);
+const exported = path.join(shots, 'test-hero.sheet.json');
+await download.saveAs(exported);
+const json = JSON.parse(readFileSync(exported, 'utf8'));
+assert.equal(json.name, 'Test hero');
+assert.match(json.$schema, /sheet\.schema\.json$/);
+assert.ok(json.sections[0].fields.some((f: { id: string; type: string }) => f.id === 'luck' && f.type === 'die'));
+await ana.setInputFiles('dialog.templates input[type=file]', exported);
+await ana.waitForFunction(() => document.querySelectorAll('dialog.templates .template-list li').length === 3);
+await ana.click('dialog.templates button:text-is("Close")');
 
 // System actions (Example system): Untap all, and Refill market's message when the deck is empty.
 assert.equal(await ana.locator('.piece.tapped').count(), 1);
@@ -139,7 +174,7 @@ await shot(ana, '05b-library-copy-bigger');
 
 // Bo sees Ana's sheet tab with the card in the Weapon slot.
 await bo.click('.dock-tab:text("Ana")');
-await bo.waitForSelector('.sheet .slot[data-slot="0"] .piece');
+await bo.waitForSelector('.sheet-t .slot[data-slot="0"] .piece');
 await shot(bo, '06-bo-sees-ana-sheet');
 
 // ---- Drawing: Bo sees the line while Ana is still drawing, then the saved stroke ---------------

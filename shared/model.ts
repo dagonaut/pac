@@ -3,6 +3,8 @@
 // images). Systems/plugins are configuration on top of this; the server never knows which one
 // a room uses.
 
+import type { SheetTemplate } from './sheet.ts';
+
 export type ZoneKind = 'deck' | 'row' | 'board' | 'slots' | 'discard' | 'hand';
 export type Visibility = 'all' | 'gm' | 'owner';
 
@@ -18,6 +20,8 @@ export interface Zone {
   fields?: Record<string, string>;
   /** Background image for a board zone (an entry in RoomState.images), drawn under everything. */
   map?: { image: string; scale: number };
+  /** Sheet template (an entry in RoomState.templates) this slots zone was made from. */
+  template?: string;
 }
 
 /** A map or handout in the room's image library. */
@@ -91,6 +95,8 @@ export interface RoomState {
   images?: Record<string, ImageDef>;
   /** The image currently shown big on everyone's screen. */
   spotlight?: { image: string; by: string } | null;
+  /** Character sheet templates. Optional for older rooms. */
+  templates?: Record<string, SheetTemplate>;
 }
 
 export interface DiceTerm {
@@ -108,7 +114,12 @@ export interface RollResult {
 
 export type Op =
   | { kind: 'chat'; text: string }
-  | { kind: 'roll'; expr: string; result?: RollResult }
+  /** `label` names what was rolled, e.g. "INT" for a click on a sheet stat. */
+  | { kind: 'roll'; expr: string; label?: string; result?: RollResult }
+  | { kind: 'template.create'; template: SheetTemplate }
+  | { kind: 'template.update'; id: string; template: SheetTemplate }
+  /** Only for templates no sheet uses. */
+  | { kind: 'template.delete'; id: string }
   | { kind: 'gm'; seat: string | null }
   | { kind: 'zone.create'; zone: Zone }
   | { kind: 'zone.delete'; id: string }
@@ -148,5 +159,5 @@ export interface LogEntry {
 }
 
 export function emptyRoom(id: string, name: string, system: string): RoomState {
-  return { id, name, system, created: new Date().toISOString(), seq: 0, gm: null, zones: {}, pieces: {}, cards: {}, strokes: {}, images: {}, spotlight: null };
+  return { id, name, system, created: new Date().toISOString(), seq: 0, gm: null, zones: {}, pieces: {}, cards: {}, strokes: {}, images: {}, spotlight: null, templates: {} };
 }

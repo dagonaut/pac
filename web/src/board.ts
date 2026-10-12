@@ -23,6 +23,8 @@ export interface TableCtx {
   live(data: unknown): void;
   /** Session token, for uploads. */
   token(): string;
+  /** The sheet templates library (build, import, export). */
+  openTemplates(): void;
 }
 
 const TABLE_W = 3200;
@@ -624,6 +626,8 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     renderDock(dock, state, {
       me: me(),
       renderZone,
+      zoneHeader: (z, count) => zoneHeader(z, count, true),
+      openTemplates: ctx.openTemplates,
       act: ctx.act,
       addZone: (anchor, owner) => addZoneMenu(anchor, owner),
     });

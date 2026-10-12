@@ -25,7 +25,17 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
     case 'zone.create': return `added ${op.zone.label}`;
     case 'zone.delete': return `removed a zone`;
     case 'zone.update': return op.set.label ? `renamed a zone to ${op.set.label}` : `changed ${zone(op.id)}`;
-    case 'field.set': return op.value === null ? `removed ${op.key} from ${zone(op.zone)}` : `set ${op.key} to ${op.value} on ${zone(op.zone)}`;
+    case 'field.set': {
+      // Templated sheets: use the field's label and the owner's name ("set HP to 11 on Ana's sheet").
+      const z = state.zones[op.zone];
+      const tpl = z?.template ? state.templates?.[z.template] : undefined;
+      const f = tpl?.sections.flatMap((s) => s.fields ?? []).find((x) => x.id === op.key);
+      const key = f?.label ?? op.key;
+      const where = z?.owner ? `${z.owner}'s sheet` : zone(op.zone);
+      if (op.value === null) return `removed ${key} from ${where}`;
+      const value = f?.type === 'checkbox' ? (op.value === 'true' ? 'on' : 'off') : f?.type === 'longtext' ? '…' : op.value;
+      return `set ${key} to ${value} on ${where}`;
+    }
     case 'card.create': return `imported ${op.card.name}`;
     case 'card.update': return `changed the art of ${state.cards[op.id]?.name ?? 'a card'}`;
     case 'card.delete': return 'removed a card from the library';
@@ -56,6 +66,9 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
     case 'image.delete': return 'deleted an image';
     case 'zone.map': return op.map ? `set the map to ${state.images?.[op.map.image]?.name ?? 'an image'}` : 'removed the map';
     case 'spotlight': return op.spotlight ? `is showing ${state.images?.[op.spotlight.image]?.name ?? 'an image'}` : 'closed the image on screen';
+    case 'template.create': return `added the sheet template ${op.template.name}`;
+    case 'template.update': return `edited the sheet template ${op.template.name}`;
+    case 'template.delete': return 'deleted a sheet template';
     case 'stroke.add': return 'drew on the table';
     case 'stroke.delete': return 'erased a drawing';
     case 'batch': {
@@ -88,7 +101,7 @@ export function addEntry(entry: LogEntry, state: RoomState, me: string) {
     li.append(`: ${op.text}`);
   } else if (op.kind === 'roll' && op.result) {
     li.className = 'roll';
-    li.append(` rolled ${op.expr}: `);
+    li.append(` rolled ${op.label ? `${op.label} (${op.expr})` : op.expr}: `);
     const r = op.result;
     const single = r.terms.length === 1 && r.terms[0].count === 1 && !r.modifier;
     if (!single) li.append(describeRoll(r).replace(/ = -?\d+$/, ' = '));

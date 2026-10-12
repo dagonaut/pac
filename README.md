@@ -6,7 +6,7 @@ Prototype, usable at the table:
 - **Rooms** that persist between sessions, each tied to one game system. They can be archived from the lobby.
 - **Audio/video**: a strip of video tiles.
 - **Cards**: bulk-import card images. Decks with random server-side draws, face-up rows, discard piles. Drag cards anywhere. Flip, tap, upgrade (with optional upgraded art), counters, notes, and a GM seat that can hide cards. A card library for adding copies.
-- **Sheets**: one per player, with named card slots and fields such as HP.
+- **Sheets**: one per player, made from a **sheet template** (JSON, see below): sections of typed fields (numbers you can click to roll, tracks, choices, notes, die sizes) and card slots. Templates have a builder with live preview and a JSON view, and they export and import between rooms.
 - **Images**: a pull-out drawer of maps and handouts per room. Upload in bulk, optionally hidden until shown. Set one as the table's background map, show one big on everyone's screen (spotlight), or put it on the table as a movable piece.
 - **Table**: pan/zoom, optional grid, resizable pieces, **live drawing**, and pings.
 - **Dice**: expressions like `2d6+3`, rolled on the server. Chat, a log of every action, and undo.
@@ -23,6 +23,36 @@ Prototype, usable at the table:
 - `scripts/smoke.ts`: end-to-end check against a deployed stack (API, WebSocket, uploads, a 150-card import).
 - `scripts/ui.ts`: two players in headless Chromium play through the whole UI.
 
+## Sheet templates
+
+A template is the shape of a character sheet, stored as JSON. Build one in the app (dock → **Templates** → **New template**), or write it by hand: the [`sheet.schema.json`](web/public/sheet.schema.json) schema (served at `https://vtt.16watt.com/sheet.schema.json`) gives VS Code autocomplete and error checking. **Export** downloads a `.sheet.json` and **Import** loads one into any room. The server validates every template with `shared/sheet.ts`.
+
+```json
+{
+  "$schema": "https://vtt.16watt.com/sheet.schema.json",
+  "name": "Raider",
+  "sections": [
+    { "title": "Stats", "fields": [
+      { "id": "int", "label": "INT", "type": "number", "default": 2, "min": -3, "max": 5, "roll": "2d6" },
+      { "id": "harm", "label": "Harm", "type": "track", "boxes": 4 },
+      { "id": "weapon_die", "label": "Weapon die", "type": "die", "default": "d8" }
+    ]},
+    { "title": "Loadout", "slots": [ { "id": "weapon", "label": "Weapon" }, { "id": "gear", "label": "Gear", "count": 3 } ] }
+  ]
+}
+```
+
+| Field type | Shows | Options |
+|---|---|---|
+| `number` | − value + | `default`, `min`, `max`; `roll`: dice rolled with the value as modifier when the label is clicked (`"2d6"` with value 2 rolls `2d6+2`) |
+| `text` / `longtext` | one line / notes box | `default` |
+| `checkbox` | on/off | `default` (true/false) |
+| `select` | dropdown | `options` (required), `default` |
+| `track` | row of boxes (harm, stress) | `boxes` (required), `default` (filled count) |
+| `die` | d4–d20 picker; click the label to roll it | `default` (e.g. `"d8"`) |
+
+`slots` are card places on the sheet. `count` repeats a slot, e.g. 3 Gear slots. Ids are lowercase keys, unique within the template. Values are stored per sheet under those ids, so renaming a label is safe but changing an id loses that field's value. Editing a template updates every sheet made from it.
+
 ## Writing a game system
 
 A system is configuration on the generic engine. The server never knows which system a room uses. Copy `web/src/systems/example.ts`, change it, add it to the list in `web/src/systems/index.ts`, and deploy:
@@ -37,7 +67,8 @@ export const mygame: GameSystem = {
     { kind: 'zone.create', zone: { id: 'market', kind: 'row', label: 'Market' } },
     { kind: 'zone.create', zone: { id: 'table', kind: 'board', label: 'Table' } },
   ],
-  sheet: { slots: ['Weapon', 'Armor', 'Gear'], fields: { HP: '10' } },  // "Create my sheet"
+  templates: [raiderSheet],           // sheet templates (JSON files) every new room starts with
+  sheet: { slots: ['Weapon', 'Armor', 'Gear'], fields: { HP: '10' } },  // plain sheet when a room has no templates
   actions: [{                         // buttons above the table
     label: 'Refill market',
     run: ({ state }) => {             // return ops (sent as one batch = one undo), or a message

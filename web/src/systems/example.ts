@@ -1,3 +1,5 @@
+import type { SheetTemplateFile } from '../../../shared/sheet.ts';
+import exampleSheet from './example.sheet.json';
 import type { GameSystem } from './index.ts';
 
 /**
@@ -19,6 +21,8 @@ export const example: GameSystem = {
     slots: ['Weapon', 'Armor', 'Gear', 'Gear', 'Gear'],
     fields: { HP: '10', Charge: '0' },
   },
+  // Same format as Templates → Export; edit the JSON file (VS Code checks it against the schema).
+  templates: [exampleSheet as SheetTemplateFile],
   actions: [
     {
       label: 'Refill market',

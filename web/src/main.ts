@@ -6,9 +6,10 @@ import { createBoard } from './board';
 import { joinChime } from './chime-av';
 import { GameClient } from './game';
 import { createImporter, uploadImage } from './importer';
+import { createTemplates } from './templates';
 import { addEntry, clearLog, note, resetLog } from './log';
 import { cameraError, getPermissions, micError, pick, probeCamera } from './media';
-import { systemName, systems } from './systems/index';
+import { setupOps, systemName, systems } from './systems/index';
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
@@ -175,7 +176,7 @@ newRoomForm.addEventListener('submit', async (e) => {
   try {
     const name = (newRoomForm.elements.namedItem('name') as HTMLInputElement).value.trim();
     const system = systems.find((s) => s.id === systemSelect.value)!;
-    const { room } = await createRoom(who.key.value, name, system.id, system.setup());
+    const { room } = await createRoom(who.key.value, name, system.id, setupOps(system));
     newRoomForm.reset();
     await enterRoom(room.id, submit);
   } catch (err) {
@@ -280,6 +281,8 @@ async function act(op: Parameters<GameClient['send']>[0]): Promise<boolean> {
   }
 }
 
+const templates = createTemplates({ state: () => game?.state ?? null, act });
+
 const board = createBoard($('#board'), {
   me: () => me,
   state: () => game?.state ?? null,
@@ -289,6 +292,7 @@ const board = createBoard($('#board'), {
   upload: (file) => uploadImage(token, file),
   live: (data) => session?.send(data),
   token: () => token,
+  openTemplates: () => templates.openLibrary(),
 });
 
 $('#dice').addEventListener('click', (e) => {

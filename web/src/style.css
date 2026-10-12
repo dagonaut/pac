@@ -1360,3 +1360,311 @@ img.map {
   border-color: var(--accent);
   background: var(--panel);
 }
+
+/* ---- Templated sheets ---- */
+
+.zone.sheet-t {
+  background: var(--panel-2);
+  min-width: 0;
+}
+
+.sheet-sections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: flex-start;
+}
+
+.sheet-section {
+  display: grid;
+  gap: 4px;
+  min-width: 160px;
+}
+
+.sheet-section h4 {
+  margin: 0;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+
+.sheet-fields {
+  display: grid;
+  gap: 3px;
+}
+
+.sf {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.sf > label {
+  min-width: 4.5rem;
+  color: var(--muted-text);
+}
+
+.sf input,
+.sf select,
+.sf textarea {
+  padding: 2px 6px;
+  font-size: 0.85rem;
+}
+
+.sf input.num {
+  width: 3.2rem;
+  text-align: center;
+}
+
+.sf .step {
+  padding: 0 6px;
+}
+
+.sf-long {
+  align-items: flex-start;
+}
+
+.sf-long textarea {
+  width: 14rem;
+  resize: vertical;
+}
+
+.sf-check {
+  color: var(--text);
+  gap: 6px;
+}
+
+.stat-roll {
+  min-width: 4.5rem;
+  text-align: left;
+  padding: 1px 6px;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.stat-roll small {
+  color: var(--muted-text);
+  font-weight: 400;
+}
+
+.track {
+  display: flex;
+  gap: 3px;
+}
+
+.track-box {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 3px;
+}
+
+.track-box.filled {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ---- Template library + editor ---- */
+
+.template-list {
+  list-style: none;
+  margin: 0 0 0.8rem;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.template-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.template-list li > div {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.template-list small {
+  color: var(--muted-text);
+}
+
+.template-list button {
+  padding: 2px 8px;
+  font-size: 0.85rem;
+}
+
+.danger-text {
+  color: #ff9c8a;
+}
+
+dialog.template-editor {
+  width: min(1200px, 96vw);
+  max-width: 96vw;
+}
+
+.editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.mode-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.mode-tabs button.active {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+
+.editor-body {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  max-height: 70vh;
+}
+
+.editor-left,
+.editor-right {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.editor-right h4 {
+  margin: 0 0 6px;
+  color: var(--muted-text);
+}
+
+.builder {
+  display: grid;
+  gap: 10px;
+}
+
+.section-box {
+  border: 1px solid #4a3f31;
+  border-radius: 8px;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.section-head,
+.field-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.section-title {
+  font-weight: 600;
+  flex: 1;
+}
+
+.field-row {
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+
+.field-main > input:first-child {
+  flex: 1;
+  min-width: 8rem;
+}
+
+.field-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding-left: 4px;
+}
+
+label.opt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--muted-text);
+}
+
+label.opt input,
+label.opt select,
+.field-main input,
+.field-main select {
+  padding: 2px 6px;
+  font-size: 0.85rem;
+}
+
+.small-num {
+  width: 4rem;
+}
+
+.id-input {
+  width: 7rem;
+  font-family: ui-monospace, monospace;
+  color: var(--muted-text);
+}
+
+.roll-input {
+  width: 11rem;
+}
+
+input.wide {
+  width: 16rem;
+}
+
+.row-tools {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.row-tools button {
+  padding: 0 6px;
+  font-size: 0.85rem;
+}
+
+.add-row {
+  display: flex;
+  gap: 6px;
+}
+
+.add-row button,
+.add-section {
+  font-size: 0.85rem;
+  padding: 2px 10px;
+  justify-self: start;
+}
+
+.json-edit {
+  width: 100%;
+  min-height: 50vh;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.template-errors {
+  margin: 8px 0 0;
+  padding-left: 1.2rem;
+  color: #ff9c8a;
+  font-size: 0.85rem;
+}
+
+.preview-sheet {
+  pointer-events: none;
+}

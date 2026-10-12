@@ -1,0 +1,39 @@
+{
+  "$schema": "https://vtt.16watt.com/sheet.schema.json",
+  "name": "Example raider",
+  "sections": [
+    {
+      "title": "Stats",
+      "fields": [
+        { "id": "str", "label": "STR", "type": "number", "default": 1, "min": -3, "max": 5, "roll": "2d6" },
+        { "id": "int", "label": "INT", "type": "number", "default": 2, "min": -3, "max": 5, "roll": "2d6" },
+        { "id": "agi", "label": "AGI", "type": "number", "default": 0, "min": -3, "max": 5, "roll": "2d6" },
+        { "id": "weapon_die", "label": "Weapon die", "type": "die", "default": "d8" }
+      ]
+    },
+    {
+      "title": "Condition",
+      "fields": [
+        { "id": "hp", "label": "HP", "type": "number", "default": 10, "min": 0, "max": 20 },
+        { "id": "harm", "label": "Harm", "type": "track", "boxes": 4 },
+        { "id": "charged", "label": "Charged", "type": "checkbox" }
+      ]
+    },
+    {
+      "title": "Loadout",
+      "slots": [
+        { "id": "weapon", "label": "Weapon" },
+        { "id": "armor", "label": "Armor" },
+        { "id": "gear", "label": "Gear", "count": 3 }
+      ]
+    },
+    {
+      "title": "Character",
+      "fields": [
+        { "id": "role", "label": "Role", "type": "select", "options": ["Pilot", "Hacker", "Muscle", "Face"] },
+        { "id": "name", "label": "Name", "type": "text" },
+        { "id": "notes", "label": "Notes", "type": "longtext" }
+      ]
+    }
+  ]
+}

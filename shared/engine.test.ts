@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { describeRoll, roll } from './dice.ts';
 import { apply, newPiece, OpError, publicNames, resolve } from './engine.ts';
 import { emptyRoom, type Op, type RoomState } from './model.ts';
+import { defaultValues, type SheetTemplateFile, slotLabels, templateErrors } from './sheet.ts';
 
 const fixed = (n: number) => () => n; // rand() that always returns n
 let seed = 1;
@@ -264,4 +265,66 @@ test('security: piece.create needs every field; zones only known keys; art only 
   for (const front of ['https://evil.example/x.png', '/assets/other-room/x.png', '/assets/r/../x.png', '/assets/r/x.svg']) {
     assert.throws(() => apply(s, { kind: 'card.create', card: { id: 'cz', name: 'Z', front } }), /uploaded to this room/, front);
   }
+});
+
+const raider: SheetTemplateFile = {
+  name: 'Raider',
+  sections: [
+    { title: 'Stats', fields: [
+      { id: 'int', label: 'INT', type: 'number', default: 2, min: -3, max: 5, roll: '2d6' },
+      { id: 'harm', label: 'Harm', type: 'track', boxes: 4 },
+      { id: 'die', label: 'Weapon die', type: 'die', default: 'd8' },
+      { id: 'class', label: 'Class', type: 'select', options: ['Pilot', 'Hacker'] },
+      { id: 'charged', type: 'checkbox' },
+      { id: 'notes', type: 'longtext' },
+    ] },
+    { title: 'Loadout', slots: [{ id: 'weapon', label: 'Weapon' }, { id: 'gear', label: 'Gear', count: 3 }] },
+  ],
+};
+
+test('templates: valid template, defaults and slot labels', () => {
+  assert.deepEqual(templateErrors(raider), []);
+  assert.deepEqual(slotLabels(raider), ['Weapon', 'Gear', 'Gear', 'Gear']);
+  assert.deepEqual(defaultValues(raider), { int: '2', harm: '0', die: 'd8', class: 'Pilot', charged: 'false', notes: '' });
+});
+
+test('templates: readable errors for bad templates', () => {
+  const bad = (patch: (t: SheetTemplateFile) => void) => {
+    const t = structuredClone(raider);
+    patch(t);
+    return templateErrors(t).join(' | ');
+  };
+  assert.match(bad((t) => { t.name = ''; }), /name/);
+  assert.match(bad((t) => { t.sections[0].fields![1].id = 'int'; }), /used twice/);
+  assert.match(bad((t) => { t.sections[0].fields![0].id = 'Has Space'; }), /lowercase/);
+  assert.match(bad((t) => { t.sections[0].fields![0].type = 'colour' as never; }), /type/);
+  assert.match(bad((t) => { t.sections[0].fields![0].roll = 'lots'; }), /dice/);
+  assert.match(bad((t) => { t.sections[0].fields![1].boxes = 99; }), /boxes/);
+  assert.match(bad((t) => { t.sections[0].fields![3].default = 'Wizard'; }), /default/);
+  assert.match(bad((t) => { (t as unknown as Record<string, unknown>).evil = 1; }), /Unknown top-level/);
+  assert.match(bad((t) => { t.sections[1].slots![1].count = 100; }), /count/);
+  assert.deepEqual(templateErrors('nope'), ['A template must be a JSON object.']);
+});
+
+test('templates: ops reverse; sheets use them; used templates cannot be deleted', () => {
+  const s = room();
+  const tpl = { ...raider, id: 'tpl-raider' };
+  roundTrip(s, { kind: 'template.create', template: tpl });
+  apply(s, { kind: 'template.create', template: tpl });
+  roundTrip(s, { kind: 'template.update', id: 'tpl-raider', template: { ...tpl, name: 'Raider v2' } });
+  assert.throws(() => apply(s, { kind: 'template.create', template: { ...tpl, id: 'tpl-bad', name: '' } }), /Template problem/);
+  apply(s, { kind: 'zone.create', zone: { id: 'sheet-a', kind: 'slots', label: 'Raider', owner: 'Ana', template: 'tpl-raider', slots: slotLabels(raider), fields: defaultValues(raider) } });
+  assert.throws(() => apply(s, { kind: 'template.delete', id: 'tpl-raider' }), /used by a sheet/);
+  assert.throws(() => apply(s, { kind: 'zone.create', zone: { id: 'sheet-b', kind: 'slots', label: 'X', template: 'missing' } }), /not in this room/);
+  assert.throws(() => apply(s, { kind: 'zone.create', zone: { id: 'z-b', kind: 'row', label: 'X', template: 'tpl-raider' } }), /Only a sheet/);
+  // Unknown keys are dropped when stored.
+  apply(s, { kind: 'template.create', template: { ...tpl, id: 'tpl-2', $schema: 'x' } as never });
+  assert.equal('$schema' in s.templates!['tpl-2'], false);
+});
+
+test('rolls keep a label', () => {
+  const s = room();
+  const op = resolve(s, { kind: 'roll', expr: '2d6+2', label: 'INT' }, { rand: fixed(3) });
+  assert.equal((op as { label?: string }).label, 'INT');
+  apply(s, op);
 });

@@ -3,18 +3,20 @@
 // state stay identical. apply() returns the op that reverses it (for undo), or null.
 import { roll } from './dice.ts';
 import type { CardDef, Op, Piece, PieceProps, RoomState, Visibility, Zone, ZoneKind } from './model.ts';
+import { normalizeTemplate, type SheetTemplate, templateErrors } from './sheet.ts';
 
 const ZONE_KINDS: ZoneKind[] = ['deck', 'row', 'board', 'slots', 'discard', 'hand'];
 const VISIBILITY: Visibility[] = ['all', 'gm', 'owner'];
 const MAX_BATCH = 200;
 const MAX_DRAW = 50;
-const MAX_FIELDS = 40;
+const MAX_FIELDS = 200;
 const MAX_STROKES = 1500;
 const MAX_STROKE_POINTS = 500;
 const MAX_ZONES = 100;
 const MAX_CARDS = 2000;
 const MAX_PIECES = 3000;
 const MAX_IMAGES = 500;
+const MAX_TEMPLATES = 50;
 
 export class OpError extends Error {}
 
@@ -37,7 +39,14 @@ function own<T>(rec: Record<string, T> | undefined, id: unknown): T | undefined 
 const isArt = (v: unknown, state: RoomState) =>
   typeof v === 'string' && v.length <= 300 && v.startsWith(`/assets/${state.id}/`) && /^\/assets\/[a-z0-9-]+\/[\w-]+\.(png|jpg|webp|gif|avif)$/.test(v);
 
-const ZONE_KEYS = new Set(['id', 'kind', 'label', 'owner', 'slots', 'fields', 'map']);
+const ZONE_KEYS = new Set(['id', 'kind', 'label', 'owner', 'slots', 'fields', 'map', 'template']);
+
+function checkTemplate(t: SheetTemplate, id: string): SheetTemplate {
+  if (!isId(id)) fail('Bad template id.');
+  const errs = templateErrors(t);
+  if (errs.length) fail(`Template problem: ${errs[0]}`);
+  return normalizeTemplate(t, id);
+}
 
 function checkMap(m: unknown, state: RoomState) {
   const map = m as { image?: unknown; scale?: unknown };
@@ -61,6 +70,7 @@ function checkZone(z: Zone) {
   if (z.owner !== undefined && !isText(z.owner, 40)) fail('Bad zone owner.');
   if (z.slots !== undefined) checkSlots(z.slots);
   if (z.map !== undefined && z.kind !== 'board') fail('Only a table can have a map.');
+  if (z.template !== undefined && z.kind !== 'slots') fail('Only a sheet can use a template.');
   if (z.fields !== undefined) {
     if (!z.fields || typeof z.fields !== 'object' || Object.keys(z.fields).length > MAX_FIELDS) fail('Too many fields.');
     for (const [k, v] of Object.entries(z.fields)) checkField(k, v);
@@ -73,7 +83,7 @@ function checkSlots(slots: unknown) {
 
 function checkField(key: unknown, value: unknown) {
   if (!isKey(key, 40)) fail('Field names are 1–40 characters.');
-  if (!isText(value, 500)) fail('Field values are at most 500 characters.');
+  if (!isText(value, 4000)) fail('Field values are at most 4000 characters.');
 }
 
 function checkCard(c: Partial<CardDef>, partial: boolean, state: RoomState) {
@@ -134,7 +144,8 @@ export function resolve(
     case 'roll':
       if (!isText(op.expr, 60)) fail('Roll expression is too long.');
       try {
-        return { kind: 'roll', expr: op.expr, result: roll(op.expr, ctx.rand) };
+        const label = isText(op.label, 60) && op.label.trim() ? op.label : undefined;
+        return { kind: 'roll', expr: op.expr, ...(label ? { label } : {}), result: roll(op.expr, ctx.rand) };
       } catch (e) {
         fail((e as Error).message); // bad expressions are the player's mistake, not a server error
       }
@@ -176,7 +187,30 @@ export function apply(state: RoomState, op: Op): Op | null {
 
     case 'roll':
       if (!op.result) fail('Roll has no result.');
+      if (op.label !== undefined && !isText(op.label, 60)) fail('Roll label is too long.');
       return null;
+
+    case 'template.create': {
+      const templates = (state.templates ??= {});
+      const t = op.template ?? fail('Missing template.');
+      if (own(templates, t.id)) fail('A template with that id already exists.');
+      if (Object.keys(templates).length >= MAX_TEMPLATES) fail(`A room holds at most ${MAX_TEMPLATES} templates.`);
+      templates[t.id] = checkTemplate(t, t.id);
+      return { kind: 'template.delete', id: t.id };
+    }
+
+    case 'template.update': {
+      const prev = own(state.templates, op.id) ?? fail('No such template.');
+      state.templates![op.id] = checkTemplate(op.template, op.id);
+      return { kind: 'template.update', id: op.id, template: prev };
+    }
+
+    case 'template.delete': {
+      const t = own(state.templates, op.id) ?? fail('No such template.');
+      if (Object.values(state.zones).some((z) => z.template === op.id)) fail(`"${t.name}" is used by a sheet.`);
+      delete state.templates![op.id];
+      return { kind: 'template.create', template: t };
+    }
 
     case 'gm': {
       if (op.seat !== null && !isText(op.seat, 40)) fail('Bad GM seat.');
@@ -188,6 +222,7 @@ export function apply(state: RoomState, op: Op): Op | null {
     case 'zone.create':
       checkZone(op.zone);
       if (op.zone.map !== undefined) checkMap(op.zone.map, state);
+      if (op.zone.template !== undefined && !own(state.templates, op.zone.template)) fail('That sheet template is not in this room.');
       if (Object.keys(state.zones).length >= MAX_ZONES) fail(`A room holds at most ${MAX_ZONES} zones.`);
       if (own(state.zones, op.zone.id)) fail(`Zone ${op.zone.id} already exists.`);
       state.zones[op.zone.id] = { ...op.zone };
