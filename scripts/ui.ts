@@ -209,6 +209,38 @@ await ana.keyboard.press('Escape');
 await ana.keyboard.press('Control+z');
 await bo.waitForSelector('svg.ink path[data-stroke]', { state: 'attached' });
 
+// ---- Shapes and text ----------------------------------------------------------------------------
+await ana.selectOption('.draw-tools .tool-group select', 'rect');
+await ana.mouse.move(t.x + 500, t.y + 60);
+await ana.mouse.down();
+await ana.mouse.move(t.x + 600, t.y + 120, { steps: 8 });
+await bo.waitForSelector('svg.ink rect:not([data-stroke])', { state: 'attached', timeout: 10000 }); // live preview
+await ana.mouse.up();
+await bo.waitForSelector('svg.ink rect[data-stroke]', { state: 'attached' });
+await untilLog(bo, 'drew a box');
+
+await ana.click('.draw-tools .tool[data-tool=text]');
+await ana.mouse.click(t.x + 650, t.y + 80);
+await ana.keyboard.type('Goblins');
+await ana.keyboard.press('Enter');
+await bo.waitForFunction(() => [...document.querySelectorAll('svg.ink text[data-stroke]')].some((e) => e.textContent === 'Goblins'));
+// Double-click to edit, drag to move.
+const label = ana.locator('svg.ink text[data-stroke]');
+await label.dblclick();
+await ana.keyboard.press('End');
+await ana.keyboard.type(' x3');
+await ana.keyboard.press('Enter');
+await bo.waitForFunction(() => document.querySelector('svg.ink text[data-stroke]')?.textContent === 'Goblins x3');
+const lb = (await label.boundingBox())!;
+const startX = await bo.locator('svg.ink text[data-stroke]').getAttribute('x');
+await ana.mouse.move(lb.x + 5, lb.y + lb.height / 2);
+await ana.mouse.down();
+await ana.mouse.move(lb.x + 85, lb.y + lb.height / 2 + 40, { steps: 8 });
+await ana.mouse.up();
+await bo.waitForFunction((x) => document.querySelector('svg.ink text[data-stroke]')?.getAttribute('x') !== x, startX);
+await shot(bo, '07b-shapes-and-text');
+await ana.keyboard.press('Escape');
+
 // ---- Images: hidden upload, set as map, spotlight, put on table ---------------------------------
 await ana.keyboard.press('Escape'); // back to the Move tool
 await ana.click('.drawer-tab');

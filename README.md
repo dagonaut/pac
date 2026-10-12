@@ -8,7 +8,7 @@ Prototype, usable at the table:
 - **Cards**: bulk-import card images. Decks with random server-side draws, face-up rows, discard piles. Drag cards anywhere. Flip, tap, upgrade (with optional upgraded art), counters, notes, and a GM seat that can hide cards. A card library for adding copies.
 - **Sheets**: one per player, made from a **sheet template** (JSON, see below): sections of typed fields (numbers you can click to roll, tracks, choices, notes, die sizes) and card slots. Templates have a builder with live preview and a JSON view, and they export and import between rooms.
 - **Images**: a pull-out drawer of maps and handouts per room. Upload in bulk, optionally hidden until shown. Set one as the table's background map, show one big on everyone's screen (spotlight), or put it on the table as a movable piece.
-- **Table**: pan/zoom, optional grid, resizable pieces, **live drawing**, and pings.
+- **Table**: pan/zoom, optional grid, resizable pieces, **live drawing** (freehand, lines, arrows, boxes, circles, text labels), and pings.
 - **Dice**: expressions like `2d6+3`, rolled on the server. Chat, a log of every action, and undo.
 
 ## Layout

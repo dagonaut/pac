@@ -328,3 +328,29 @@ test('rolls keep a label', () => {
   assert.equal((op as { label?: string }).label, 'INT');
   apply(s, op);
 });
+
+test('shapes and text: validated, editable, movable, and they reverse', () => {
+  const s = room();
+  const base = { zone: 'board', color: '#ff0000', width: 4, by: 'Ana' };
+  roundTrip(s, { kind: 'stroke.add', stroke: { ...base, id: 'l1', shape: 'arrow', points: [0, 0, 100, 50] } });
+  roundTrip(s, { kind: 'stroke.add', stroke: { ...base, id: 'r1', shape: 'rect', fill: true, points: [10, 10, 60, 40] } });
+  apply(s, { kind: 'stroke.add', stroke: { ...base, id: 't1', shape: 'text', text: 'Goblins here', points: [200, 200] } });
+  assert.equal(s.strokes!.t1.text, 'Goblins here');
+  roundTrip(s, { kind: 'stroke.update', id: 't1', set: { text: 'Goblins (3)' } });
+  roundTrip(s, { kind: 'stroke.update', id: 't1', set: { points: [250, 220] } });
+  // Old-style strokes stay plain paths (no shape key stored).
+  apply(s, { kind: 'stroke.add', stroke: { ...base, id: 'p1', points: [0, 0, 5, 5, 9, 2] } });
+  assert.equal('shape' in s.strokes!.p1, false);
+  for (const bad of [
+    { ...base, id: 'b1', shape: 'rect', points: [0, 0, 1] },
+    { ...base, id: 'b2', shape: 'line', points: [0, 0, 1, 1, 2, 2] },
+    { ...base, id: 'b3', shape: 'text', points: [0, 0] },
+    { ...base, id: 'b4', shape: 'text', text: 'x'.repeat(201), points: [0, 0] },
+    { ...base, id: 'b5', shape: 'line', fill: true, points: [0, 0, 1, 1] },
+    { ...base, id: 'b6', shape: 'star', points: [0, 0, 1, 1] },
+    { ...base, id: 'b7', shape: 'line', text: 'hi', points: [0, 0, 1, 1] },
+    { ...base, id: 'b8', points: [0, 0], evil: 1 },
+  ]) assert.throws(() => apply(s, { kind: 'stroke.add', stroke: bad as never }), OpError, JSON.stringify(bad));
+  assert.throws(() => apply(s, { kind: 'stroke.update', id: 'p1', set: { text: 'no' } }), OpError);
+  assert.throws(() => apply(s, { kind: 'stroke.update', id: 't1', set: { points: [1, 2, 3, 4] } }), OpError);
+});

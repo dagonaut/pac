@@ -69,8 +69,14 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
     case 'template.create': return `added the sheet template ${op.template.name}`;
     case 'template.update': return `edited the sheet template ${op.template.name}`;
     case 'template.delete': return 'deleted a sheet template';
-    case 'stroke.add': return 'drew on the table';
+    case 'stroke.add': {
+      const k = op.stroke;
+      if (k.shape === 'text') return `wrote "${k.text}" on the table`;
+      const what = { line: 'a line', arrow: 'an arrow', rect: 'a box', ellipse: 'a circle', path: '', text: '' }[k.shape ?? 'path'];
+      return what ? `drew ${what} on the table` : 'drew on the table';
+    }
     case 'stroke.delete': return 'erased a drawing';
+    case 'stroke.update': return op.set.text !== undefined ? `changed text to "${op.set.text}"` : 'moved a drawing';
     case 'batch': {
       if (op.ops.length && op.ops.every((o) => o.kind === 'stroke.delete')) return `cleared ${op.ops.length} drawing${op.ops.length === 1 ? '' : 's'}`;
       if (op.ops.length && op.ops.every((o) => o.kind === 'image.create')) return `uploaded ${op.ops.length} image${op.ops.length === 1 ? '' : 's'}`;

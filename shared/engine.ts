@@ -2,7 +2,7 @@
 // copy, then broadcasts the resolved op; every browser runs the same apply(), so all copies of the
 // state stay identical. apply() returns the op that reverses it (for undo), or null.
 import { roll } from './dice.ts';
-import type { CardDef, Op, Piece, PieceProps, RoomState, Visibility, Zone, ZoneKind } from './model.ts';
+import type { CardDef, Op, Piece, PieceProps, RoomState, StrokeShape, Visibility, Zone, ZoneKind } from './model.ts';
 import { normalizeTemplate, type SheetTemplate, templateErrors } from './sheet.ts';
 
 const ZONE_KINDS: ZoneKind[] = ['deck', 'row', 'board', 'slots', 'discard', 'hand'];
@@ -38,6 +38,19 @@ function own<T>(rec: Record<string, T> | undefined, id: unknown): T | undefined 
 /** Card art must be an image uploaded to this room (no outside URLs that could track players). */
 const isArt = (v: unknown, state: RoomState) =>
   typeof v === 'string' && v.length <= 300 && v.startsWith(`/assets/${state.id}/`) && /^\/assets\/[a-z0-9-]+\/[\w-]+\.(png|jpg|webp|gif|avif)$/.test(v);
+
+const STROKE_SHAPES: StrokeShape[] = ['path', 'line', 'arrow', 'rect', 'ellipse', 'text'];
+
+function checkStrokePoints(pts: unknown, shape: StrokeShape) {
+  const need = shape === 'text' ? 2 : shape === 'path' ? 0 : 4;
+  if (!Array.isArray(pts) || pts.length < 2 || pts.length % 2 || pts.length > MAX_STROKE_POINTS * 2) fail('Bad stroke points.');
+  if (need && pts.length !== need) fail(`A ${shape} needs ${need / 2} point${need === 2 ? '' : 's'}.`);
+  if (!pts.every((v) => Number.isInteger(v) && v > -5000 && v < 20000)) fail('Bad stroke points.');
+}
+
+function checkStrokeText(t: unknown) {
+  if (typeof t !== 'string' || !t.trim() || t.length > 200) fail('Text labels are 1–200 characters.');
+}
 
 const ZONE_KEYS = new Set(['id', 'kind', 'label', 'owner', 'slots', 'fields', 'map', 'template']);
 
@@ -404,17 +417,52 @@ export function apply(state: RoomState, op: Op): Op | null {
     case 'stroke.add': {
       const k = op.stroke;
       const strokes = (state.strokes ??= {});
-      if (!k || !isId(k.id) || strokes[k.id]) fail('Bad or duplicate stroke.');
+      if (!k || typeof k !== 'object' || !isId(k.id) || own(strokes, k.id)) fail('Bad or duplicate stroke.');
+      const extra = Object.keys(k).find((x) => !['id', 'zone', 'color', 'width', 'points', 'by', 'shape', 'fill', 'text'].includes(x));
+      if (extra) fail(`Unknown drawing field ${extra}.`);
       if (own(state.zones, k.zone)?.kind !== 'board') fail('Strokes go on a table.');
       if (typeof k.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(k.color)) fail('Bad stroke color.');
       if (!isNum(k.width) || k.width < 1 || k.width > 40) fail('Bad stroke width.');
       if (!isText(k.by, 40)) fail('Bad stroke author.');
-      const pts = k.points;
-      if (!Array.isArray(pts) || pts.length < 2 || pts.length % 2 || pts.length > MAX_STROKE_POINTS * 2) fail('Bad stroke points.');
-      if (!pts.every((v) => Number.isInteger(v) && v > -5000 && v < 20000)) fail('Bad stroke points.');
+      const shape = k.shape ?? 'path';
+      if (!STROKE_SHAPES.includes(shape)) fail(`Unknown drawing shape "${String(shape)}".`);
+      checkStrokePoints(k.points, shape);
+      if (k.fill !== undefined && (typeof k.fill !== 'boolean' || (shape !== 'rect' && shape !== 'ellipse'))) fail('Only boxes and circles can be filled.');
+      if (shape === 'text') checkStrokeText(k.text);
+      else if (k.text !== undefined) fail('Only text drawings have text.');
       if (Object.keys(strokes).length >= MAX_STROKES) fail('The table is full of drawings; clear some first.');
-      strokes[k.id] = { id: k.id, zone: k.zone, color: k.color, width: k.width, points: [...pts], by: k.by };
+      strokes[k.id] = {
+        id: k.id, zone: k.zone, color: k.color, width: k.width, points: [...k.points], by: k.by,
+        ...(shape !== 'path' ? { shape } : {}),
+        ...(k.fill ? { fill: true } : {}),
+        ...(shape === 'text' ? { text: k.text } : {}),
+      };
       return { kind: 'stroke.delete', id: k.id };
+    }
+
+    case 'stroke.update': {
+      const k = own(state.strokes, op.id) ?? fail('That drawing is already gone.');
+      if (!op.set || typeof op.set !== 'object') fail('Nothing to update.');
+      const keys = Object.keys(op.set);
+      if (!keys.length || keys.some((x) => x !== 'points' && x !== 'text')) fail('Only a drawing\'s position or text can change.');
+      if (op.set.points !== undefined) {
+        checkStrokePoints(op.set.points, k.shape ?? 'path');
+        if (op.set.points.length !== k.points.length) fail('A moved drawing keeps its number of points.');
+      }
+      if (op.set.text !== undefined) {
+        if (k.shape !== 'text') fail('Only text drawings have text.');
+        checkStrokeText(op.set.text);
+      }
+      const prev: { points?: number[]; text?: string } = {};
+      if (op.set.points !== undefined) {
+        prev.points = k.points;
+        k.points = [...op.set.points];
+      }
+      if (op.set.text !== undefined) {
+        prev.text = k.text;
+        k.text = op.set.text;
+      }
+      return { kind: 'stroke.update', id: op.id, set: prev };
     }
 
     case 'stroke.delete': {

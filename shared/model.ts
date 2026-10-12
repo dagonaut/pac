@@ -67,15 +67,25 @@ export interface Piece {
 /** Fields a piece.update may change (everything except identity). */
 export type PieceProps = Omit<Piece, 'id' | 'def'>;
 
-/** A freehand line drawn on a board zone, in table coordinates. */
+export type StrokeShape = 'path' | 'line' | 'arrow' | 'rect' | 'ellipse' | 'text';
+
+/** A drawing on a board zone, in table coordinates: a freehand line, a shape or a text label. */
 export interface Stroke {
   id: string;
   zone: string;
   color: string;
+  /** Line width; for text, the size step (font size is derived from it). */
   width: number;
-  /** Flattened [x0, y0, x1, y1, ...], whole pixels. */
+  /** Flattened, whole pixels. path: [x0, y0, x1, y1, ...]; line/arrow: start and end; rect/ellipse:
+   *  two opposite corners; text: its top-left corner. */
   points: number[];
   by: string;
+  /** Default 'path' (freehand; also what every stroke drawn before shapes existed is). */
+  shape?: StrokeShape;
+  /** rect/ellipse: filled (translucent) instead of outlined. */
+  fill?: boolean;
+  /** text: the words. */
+  text?: string;
 }
 
 export interface RoomState {
@@ -143,6 +153,8 @@ export type Op =
   | { kind: 'spotlight'; spotlight: { image: string; by: string } | null }
   | { kind: 'stroke.add'; stroke: Stroke }
   | { kind: 'stroke.delete'; id: string }
+  /** Move a drawing (new points) or change a text label's words. */
+  | { kind: 'stroke.update'; id: string; set: { points?: number[]; text?: string } }
   | { kind: 'batch'; ops: Op[] }
   /** Client sends `{kind:'undo'}`; the server fills in which entry and the op that reverses it. */
   | { kind: 'undo'; target?: number; op?: Op };

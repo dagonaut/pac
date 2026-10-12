@@ -1082,9 +1082,57 @@ svg.ink {
   stroke-linejoin: round;
 }
 
-.table-surface[data-tool='erase'] svg.ink path[data-stroke] {
-  pointer-events: stroke;
+.table-surface[data-tool='erase'] svg.ink [data-stroke] {
+  pointer-events: visiblePainted;
   cursor: pointer;
+}
+
+.table-surface[data-tool='text'] svg.ink text[data-stroke] {
+  pointer-events: all;
+  cursor: move;
+}
+
+.table-surface[data-tool='text'],
+.table-surface[data-tool='shape'] {
+  cursor: crosshair;
+}
+
+svg.ink .ink-text {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-weight: 700;
+  dominant-baseline: hanging;
+  stroke: #000c;
+  stroke-width: 4px;
+  paint-order: stroke;
+  user-select: none;
+}
+
+.text-editor {
+  position: absolute;
+  z-index: 10000002;
+  min-width: 10ch;
+  padding: 0 2px;
+  margin: -2px 0 0 -3px;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-weight: 700;
+  line-height: 1;
+  background: #000a;
+  border: 1px dashed var(--accent);
+  border-radius: 3px;
+}
+
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.fill-toggle {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.8rem;
+  color: var(--muted-text);
 }
 
 .table-surface[data-tool='pen'],
