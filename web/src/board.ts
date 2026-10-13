@@ -66,7 +66,25 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
   const dock = h('div.sheet-dock');
   const preview = h('div.preview', { hidden: true });
   const area = h('div.table-area', {}, wrap, hint, zoomBox);
-  root.replaceChildren(bar, area, dock, preview);
+  // The zone bar (decks, rows, discards, card buttons) slides up out of the way; a tab on its
+  // bottom edge opens/closes it, like the Sheets and Chat & dice tabs.
+  let barCollapsed = false;
+  try {
+    barCollapsed = localStorage.getItem('vtt.barCollapsed') === '1';
+  } catch { /* ignore */ }
+  const barHandle = h('button.bar-handle', { type: 'button' }, 'Cards');
+  const barPane = h('div.bar-pane', {}, bar, barHandle);
+  const setBar = (collapsed: boolean) => {
+    barCollapsed = collapsed;
+    barPane.classList.toggle('collapsed', collapsed);
+    barHandle.title = collapsed ? 'Show decks, rows and card tools' : 'Hide decks, rows and card tools';
+    try {
+      localStorage.setItem('vtt.barCollapsed', collapsed ? '1' : '0');
+    } catch { /* ignore */ }
+  };
+  barHandle.addEventListener('click', () => setBar(!barCollapsed));
+  setBar(barCollapsed);
+  root.replaceChildren(barPane, area, dock, preview);
 
   let zoom = Number(localStorage.getItem('vtt.zoom')) || 1;
   function setZoom(z: number) {

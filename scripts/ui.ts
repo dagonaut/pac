@@ -352,6 +352,13 @@ await bo.fill('#roll-form input', '2d6+1');
 await bo.click('#roll-form button');
 await untilLog(ana, 'rolled 2d6+1');
 
+// The Cards tab slides the deck/row bar closed and open.
+await ana.click('.bar-handle');
+await ana.waitForSelector('.board-bar', { state: 'hidden' });
+await shot(ana, '10a-cards-bar-closed');
+await ana.click('.bar-handle');
+await ana.waitForSelector('.zone[data-zone=loot]', { state: 'visible' });
+
 // Chat & dice panel: hide it, get an unread count, show it again.
 await bo.click('#side-tab');
 await bo.waitForSelector('#side', { state: 'hidden' });

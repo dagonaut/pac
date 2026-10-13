@@ -245,6 +245,7 @@ header .spacer {
 #board {
   grid-area: board;
   position: relative;
+  overflow: hidden; /* never spill over the controls below */
   margin: 0 8px 8px;
   display: flex;
   flex-direction: column;
@@ -458,13 +459,48 @@ form.inline input {
 
 /* ---- Board ---- */
 
+.bar-pane {
+  position: relative;
+  flex: 0 0 auto;
+  margin-bottom: 14px;
+}
+
 .board-bar {
   display: flex;
   gap: 8px;
   align-items: flex-start;
   overflow-x: auto;
-  flex: 0 0 auto;
+  max-height: 40vh;
+  transition: max-height 0.2s ease, opacity 0.2s ease;
   --card-w: 64px;
+}
+
+.bar-pane.collapsed .board-bar {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.bar-pane.collapsed {
+  margin-bottom: 0;
+}
+
+/* Tab on the bar's bottom edge; when the bar is closed it sits at the top of the table. */
+.bar-handle {
+  position: absolute;
+  left: 50%;
+  bottom: -22px;
+  transform: translateX(-50%);
+  z-index: 7;
+  padding: 2px 14px;
+  font-size: 0.85rem;
+  border-radius: 0 0 6px 6px;
+  background: var(--panel);
+}
+
+.bar-pane.collapsed .bar-handle {
+  bottom: -24px;
 }
 
 .zone {
@@ -590,7 +626,7 @@ form.inline input {
 .table-area {
   position: relative;
   flex: 1;
-  min-height: 160px;
+  min-height: 120px;
   border-radius: var(--radius);
   overflow: hidden;
   background: #1d1914;
@@ -1114,6 +1150,9 @@ dialog.modal label {
 }
 
 .dock-body {
+  /* Tall sheets scroll inside the dock instead of pushing the page past the controls. */
+  max-height: 30vh;
+  overflow-y: auto;
   display: flex;
   gap: 10px;
   align-items: flex-start;
@@ -1262,7 +1301,7 @@ svg.ink .ink-text {
 
 .draw-tools {
   position: absolute;
-  top: 8px;
+  top: 28px; /* below the Cards tab hanging from the top edge */
   left: 8px;
   display: flex;
   align-items: center;
@@ -1518,7 +1557,7 @@ img.map {
 
 .spot-chip {
   position: absolute;
-  top: 8px;
+  top: 30px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 6;
