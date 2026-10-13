@@ -51,6 +51,8 @@ A template is the shape of a character sheet, stored as JSON. Build one in the a
 | `track` | row of boxes (harm, stress) | `boxes` (required), `default` (filled count) |
 | `die` | d4–d20 picker; click the label to roll it | `default` (e.g. `"d8"`) |
 
+Any field can have a `hint` (small help text under it, e.g. "Awareness, understanding, smarts"), and any section a `note` (rules or instructions under its title).
+
 `slots` are card places on the sheet. `count` repeats a slot, e.g. 3 Gear slots. Ids are lowercase keys, unique within the template. Values are stored per sheet under those ids, so renaming a label is safe but changing an id loses that field's value. Editing a template updates every sheet made from it.
 
 ## Writing a game system
