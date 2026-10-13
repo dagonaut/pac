@@ -108,7 +108,14 @@ const from = (await ana.locator('.table-surface .piece').boundingBox())!;
 const slot = (await ana.locator('.sheet-t .slot[data-slot="0"]').boundingBox())!;
 await ana.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
 await ana.mouse.down();
-await ana.mouse.move(slot.x + slot.width / 2, slot.y + slot.height / 2, { steps: 12 });
+// Halfway there, the dragged copy must be under the pointer (it used to appear far away).
+const dragX = (from.x + from.width / 2 + slot.x + slot.width / 2) / 2;
+const dragY = (from.y + from.height / 2 + slot.y + slot.height / 2) / 2;
+await ana.mouse.move(dragX, dragY, { steps: 6 });
+const ghost = (await ana.locator('.piece.ghost').boundingBox())!;
+assert.ok(dragX >= ghost.x && dragX <= ghost.x + ghost.width && dragY >= ghost.y && dragY <= ghost.y + ghost.height,
+  `dragged copy ${JSON.stringify(ghost)} should be under the pointer (${dragX}, ${dragY})`);
+await ana.mouse.move(slot.x + slot.width / 2, slot.y + slot.height / 2, { steps: 6 });
 await ana.mouse.up();
 await ana.waitForSelector('.sheet-t .slot[data-slot="0"] .piece');
 
@@ -168,8 +175,22 @@ await ana.click('.menu .menu-item:text-is("Table")');
 await ana.waitForSelector('.table-surface .piece');
 await ana.click('dialog >> text=Close');
 await ana.locator('.table-surface .piece').click();
-await ana.click('.menu .size-row button[title=Bigger]');
+await ana.fill('.menu .size-row input.pct', '150');
+await ana.press('.menu .size-row input.pct', 'Enter');
 await ana.waitForFunction(() => (document.querySelector('.table-surface .piece') as HTMLElement)?.style.getPropertyValue('--scale') === '1.5');
+
+// Counters: add "poison" in the third palette color; Bo sees the colored badge, and the hover
+// preview shows it too.
+await ana.locator('.table-surface .piece').click();
+await ana.fill('.menu .add-counter input', 'poison');
+await ana.click('.menu .add-counter .swatch >> nth=2');
+await ana.click('.menu .add-counter button[type=submit]');
+await bo.waitForFunction(() => {
+  const b = document.querySelector('.table-surface .piece .badge.counter') as HTMLElement | null;
+  return b?.title === 'poison: 1' && getComputedStyle(b).backgroundColor === 'rgb(89, 205, 144)';
+});
+await ana.locator('.table-surface .piece').hover();
+await ana.waitForSelector('.preview:not([hidden]) .preview-badges .badge.counter');
 await shot(ana, '05b-library-copy-bigger');
 
 // Bo sees Ana's sheet tab with the card in the Weapon slot.
@@ -222,15 +243,21 @@ await untilLog(bo, 'drew a box');
 await ana.click('.draw-tools .tool[data-tool=text]');
 await ana.mouse.click(t.x + 650, t.y + 80);
 await ana.keyboard.type('Goblins');
-await ana.keyboard.press('Enter');
-await bo.waitForFunction(() => [...document.querySelectorAll('svg.ink text[data-stroke]')].some((e) => e.textContent === 'Goblins'));
+await ana.keyboard.press('Enter'); // a new line, not done yet
+await ana.keyboard.type('by the door');
+await ana.keyboard.press('Control+Enter');
+await bo.waitForFunction(() => {
+  const spans = [...document.querySelectorAll('svg.ink text[data-stroke] tspan')].map((t) => t.textContent);
+  return spans.join('|') === 'Goblins|by the door';
+});
 // Double-click to edit, drag to move.
 const label = ana.locator('svg.ink text[data-stroke]');
 await label.dblclick();
 await ana.keyboard.press('End');
+await ana.keyboard.press('Control+End');
 await ana.keyboard.type(' x3');
-await ana.keyboard.press('Enter');
-await bo.waitForFunction(() => document.querySelector('svg.ink text[data-stroke]')?.textContent === 'Goblins x3');
+await ana.mouse.click(t.x + 900, t.y + 200); // clicking away finishes
+await bo.waitForFunction(() => [...document.querySelectorAll('svg.ink text[data-stroke] tspan')].map((t) => t.textContent).join('|') === 'Goblins|by the door x3');
 const lb = (await label.boundingBox())!;
 const startX = await bo.locator('svg.ink text[data-stroke]').getAttribute('x');
 await ana.mouse.move(lb.x + 5, lb.y + lb.height / 2);
@@ -263,6 +290,16 @@ await bo.waitForFunction(() => {
 await bo.waitForSelector('.image-grid figure:not(.hidden-image)'); // setting the map revealed it
 await untilLog(bo, 'set the map to');
 
+// Map size: typed %; the controls hide from players once someone holds the GM seat.
+await ana.fill('.map-controls input.pct', '50');
+await ana.press('.map-controls input.pct', 'Enter');
+await untilLog(bo, 'set the map to');
+await bo.waitForFunction(() => (document.querySelector('.map-controls input.pct') as HTMLInputElement)?.value === '50');
+await ana.click('#gm-btn');
+await bo.waitForSelector('.map-controls', { state: 'hidden' });
+await ana.waitForSelector('.map-controls:not([hidden])');
+await ana.click('#gm-btn'); // leave the seat again
+
 await ana.click('.image-grid .thumb');
 await ana.click('.menu .menu-item:text-is("Show to everyone")');
 await bo.waitForSelector('.spotlight:not([hidden]):not(.local) img');
@@ -276,8 +313,15 @@ await ana.click('.image-grid .thumb');
 const before = await ana.locator('.table-surface .piece').count();
 await ana.click('.menu .menu-item:text-is("Put on the table")');
 await ana.waitForFunction((n) => document.querySelectorAll('.table-surface .piece').length === n + 1, before);
-await ana.click('.drawer-close');
+await ana.click('.drawer-tab'); // the tab closes the drawer too
+await ana.waitForSelector('.drawer', { state: 'hidden' });
 await shot(ana, '09-map-and-handout');
+
+// The Sheets tab collapses and reopens the sheet dock.
+await ana.click('.dock-handle');
+await ana.waitForSelector('.dock-body', { state: 'detached' });
+await ana.click('.dock-handle');
+await ana.waitForSelector('.dock-body');
 
 // Dice + chat still work.
 await bo.fill('#roll-form input', '2d6+1');

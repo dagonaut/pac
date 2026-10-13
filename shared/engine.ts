@@ -49,7 +49,8 @@ function checkStrokePoints(pts: unknown, shape: StrokeShape) {
 }
 
 function checkStrokeText(t: unknown) {
-  if (typeof t !== 'string' || !t.trim() || t.length > 200) fail('Text labels are 1–200 characters.');
+  if (typeof t !== 'string' || !t.trim() || t.length > 1000) fail('Text is 1–1000 characters.');
+  if (t.split('\n').length > 40) fail('Text is at most 40 lines.');
 }
 
 const ZONE_KEYS = new Set(['id', 'kind', 'label', 'owner', 'slots', 'fields', 'map', 'template']);
@@ -412,6 +413,19 @@ export function apply(state: RoomState, op: Op): Op | null {
       const prev = state.spotlight ?? null;
       state.spotlight = sp ? { image: sp.image, by: sp.by } : null;
       return { kind: 'spotlight', spotlight: prev };
+    }
+
+    case 'counter.color': {
+      if (!isKey(op.name, 30)) fail('Bad counter name.');
+      if (op.color !== null && (typeof op.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(op.color))) fail('Bad counter color.');
+      const colors = (state.counterColors ??= {});
+      const prev = Object.hasOwn(colors, op.name) ? colors[op.name] : null;
+      if (op.color === null) delete colors[op.name];
+      else {
+        if (prev === null && Object.keys(colors).length >= 100) fail('Too many counter colors.');
+        colors[op.name] = op.color;
+      }
+      return { kind: 'counter.color', name: op.name, color: prev };
     }
 
     case 'stroke.add': {

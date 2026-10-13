@@ -32,6 +32,8 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
   const me = () => ctx.me();
   const isGm = () => st().gm === me();
   const canSee = (img: ImageDef) => !img.hidden || isGm() || img.by === me();
+  /** Changing the table's map is the GM's job, or anyone's when nobody holds the GM seat. */
+  const canMap = () => !st().gm || isGm();
 
   // ---- Drawer ---------------------------------------------------------------------------------
 
@@ -45,16 +47,17 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
   const drawer = h('aside.drawer', { hidden: true },
     h('div.drawer-head', {},
       h('strong', {}, 'Images'),
-      h('button', { type: 'button', onclick: () => openUpload() }, 'Upload'),
-      h('button.drawer-close', { type: 'button', title: 'Close', onclick: () => toggle(false) }, '×')),
+      h('button', { type: 'button', onclick: () => openUpload() }, 'Upload')),
     filters, search, grid);
-  const tab = h('button.drawer-tab', { type: 'button', title: 'Maps and handouts', onclick: () => toggle() }, 'Images');
+  // The tab stays attached to the drawer's edge and opens/closes it (like the Chat & dice tab).
+  const tab = h('button.drawer-tab', { type: 'button', title: 'Show maps and handouts', onclick: () => toggle() }, 'Images');
   area.append(tab, drawer);
 
   function toggle(force?: boolean) {
     open = force ?? !open;
     drawer.hidden = !open;
     tab.classList.toggle('active', open);
+    tab.title = open ? 'Hide maps and handouts' : 'Show maps and handouts';
     if (open) fill();
   }
 
@@ -102,8 +105,8 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
     openMenu(anchorEl.getBoundingClientRect(),
       heading(img.name),
       item('View', () => lightbox(img.src, img.name)),
-      !!zone && (isMap
-        ? item('Remove from the table', () => ctx.act({ kind: 'zone.map', id: zone, map: null }))
+      !!zone && canMap() && (isMap
+        ? item('Remove from the table', () => confirm(`Remove the map "${img.name}" from the table?`) && ctx.act({ kind: 'zone.map', id: zone, map: null }))
         : item('Set as map', () => send([...reveal(img), { kind: 'zone.map', id: zone, map: { image: img.id, scale: fitScale(anchorEl.querySelector('img')) } }]))),
       item('Show to everyone', () => send([...reveal(img), { kind: 'spotlight', spotlight: { image: img.id, by: me() } }])),
       !!zone && item('Put on the table', () => {
@@ -238,20 +241,40 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
 
   const mapImg = h('img.map', { alt: '', draggable: false });
   surface.prepend(mapImg);
-  const mapLabel = h('span', {}, '');
+  // Map size controls: labelled "Map size" so they aren't mistaken for table zoom, shown only to
+  // whoever may change the map, and removing the map asks first.
+  const mapPct = h('input.pct', { type: 'number', min: '10', max: '1000', step: '5', title: 'Map size in percent' });
+  const commitPct = () => {
+    const v = Number(mapPct.value);
+    if (Number.isFinite(v) && v > 0) setMapScale(v / 100);
+  };
+  mapPct.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), commitPct()));
+  mapPct.addEventListener('change', commitPct);
   const mapBox = h('div.map-controls', { hidden: true },
-    mapLabel,
+    h('span', {}, 'Map size'),
     h('button', { type: 'button', title: 'Smaller map', onclick: () => scaleMap(1 / 1.25) }, '−'),
+    mapPct, h('span.pct-sign', {}, '%'),
     h('button', { type: 'button', title: 'Bigger map', onclick: () => scaleMap(1.25) }, '+'),
-    h('button', { type: 'button', title: 'Remove the map', onclick: () => { const z = ctx.tableZone(); if (z) void ctx.act({ kind: 'zone.map', id: z, map: null }); } }, '×'));
+    h('button.map-remove', { type: 'button', title: 'Remove the map from the table', onclick: () => {
+      const z = ctx.tableZone();
+      const name = z ? st().images?.[st().zones[z]?.map?.image ?? '']?.name : undefined;
+      if (z && confirm(`Remove the map${name ? ` "${name}"` : ''} from the table? (It stays in Images.)`)) void ctx.act({ kind: 'zone.map', id: z, map: null });
+    } }, 'Remove'));
   area.append(mapBox);
+
+  function setMapScale(scale: number) {
+    const z = ctx.tableZone();
+    const map = z ? st().zones[z]?.map : undefined;
+    if (!z || !map) return;
+    const s = Math.round(Math.min(10, Math.max(0.1, scale)) * 100) / 100;
+    if (s !== map.scale) void ctx.act({ kind: 'zone.map', id: z, map: { image: map.image, scale: s } });
+    else mapPct.value = String(Math.round(map.scale * 100));
+  }
 
   function scaleMap(f: number) {
     const z = ctx.tableZone();
     const map = z ? st().zones[z]?.map : undefined;
-    if (!z || !map) return;
-    const scale = Math.round(Math.min(10, Math.max(0.1, map.scale * f)) * 100) / 100;
-    void ctx.act({ kind: 'zone.map', id: z, map: { image: map.image, scale } });
+    if (map) setMapScale(map.scale * f);
   }
 
   function sizeMap(scale: number) {
@@ -276,8 +299,8 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
       return;
     }
     mapImg.hidden = false;
-    mapBox.hidden = false;
-    mapLabel.textContent = `Map ${Math.round(map.scale * 100)}%`;
+    mapBox.hidden = !(!state.gm || state.gm === me());
+    if (document.activeElement !== mapPct) mapPct.value = String(Math.round(map.scale * 100));
     mapImg.onload = () => sizeMap(map.scale);
     if (mapImg.getAttribute('src') !== img.src) mapImg.src = img.src;
     else if (mapImg.complete && mapImg.naturalWidth) sizeMap(map.scale);

@@ -84,7 +84,7 @@ export interface Stroke {
   shape?: StrokeShape;
   /** rect/ellipse: filled (translucent) instead of outlined. */
   fill?: boolean;
-  /** text: the words. */
+  /** text: the words (may contain line breaks). */
   text?: string;
 }
 
@@ -107,6 +107,8 @@ export interface RoomState {
   spotlight?: { image: string; by: string } | null;
   /** Character sheet templates. Optional for older rooms. */
   templates?: Record<string, SheetTemplate>;
+  /** Counter name -> color, shared by every piece in the room (so "poison" always looks the same). */
+  counterColors?: Record<string, string>;
 }
 
 export interface DiceTerm {
@@ -151,6 +153,8 @@ export type Op =
   /** Set (or clear, with null) a board zone's background map. */
   | { kind: 'zone.map'; id: string; map: { image: string; scale: number } | null }
   | { kind: 'spotlight'; spotlight: { image: string; by: string } | null }
+  /** Set (or clear, with null) the color for a counter name, room-wide. */
+  | { kind: 'counter.color'; name: string; color: string | null }
   | { kind: 'stroke.add'; stroke: Stroke }
   | { kind: 'stroke.delete'; id: string }
   /** Move a drawing (new points) or change a text label's words. */
@@ -171,5 +175,5 @@ export interface LogEntry {
 }
 
 export function emptyRoom(id: string, name: string, system: string): RoomState {
-  return { id, name, system, created: new Date().toISOString(), seq: 0, gm: null, zones: {}, pieces: {}, cards: {}, strokes: {}, images: {}, spotlight: null, templates: {} };
+  return { id, name, system, created: new Date().toISOString(), seq: 0, gm: null, zones: {}, pieces: {}, cards: {}, strokes: {}, images: {}, spotlight: null, templates: {}, counterColors: {} };
 }

@@ -3,6 +3,32 @@
 import type { Piece, RoomState } from '../../shared/model.ts';
 import { h } from './dom';
 
+/** Counter palette. A counter name keeps its color room-wide (RoomState.counterColors). */
+export const COUNTER_COLORS = ['#f4d35e', '#ee6352', '#59cd90', '#3fa7d6', '#b48ead', '#f29e4c', '#fafafa', '#8a8a8a'];
+
+export function counterColor(state: RoomState, name: string): string {
+  const set = state.counterColors && Object.hasOwn(state.counterColors, name) ? state.counterColors[name] : undefined;
+  if (set) return set;
+  let hash = 0;
+  for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
+  return COUNTER_COLORS[Math.abs(hash) % COUNTER_COLORS.length];
+}
+
+/** Dark or light text, whichever reads better on `bg`. */
+export function inkOn(bg: string): string {
+  const n = parseInt(bg.slice(1), 16);
+  const lum = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  return lum > 150 ? '#1b150e' : '#fafafa';
+}
+
+/** Counter badges for a piece (on the card and in the large preview). */
+export function counterBadges(p: Piece, state: RoomState): HTMLElement[] {
+  return Object.entries(p.counters).map(([name, n]) => {
+    const bg = counterColor(state, name);
+    return h('span.badge.counter', { title: `${name}: ${n}`, style: { background: bg, color: inkOn(bg) } }, name.length <= 2 ? `${name}${n}` : `${n}`);
+  });
+}
+
 export interface Face {
   /** Image to show, or null for the default card back. */
   src: string | null;
@@ -38,16 +64,14 @@ export function pieceEl(p: Piece, state: RoomState, me: string): HTMLElement {
     els.set(p.id, el);
   }
   const face = faceOf(p, state, me);
-  const key = JSON.stringify([face, p.tapped, p.upgraded, p.counters, p.note, p.visibleTo]);
+  const colors = Object.keys(p.counters).map((n) => counterColor(state, n));
+  const key = JSON.stringify([face, p.tapped, p.upgraded, p.counters, colors, p.note, p.visibleTo]);
   if (el.dataset.key !== key) {
     el.dataset.key = key;
     const body = face.src
       ? h('img', { src: face.src, alt: face.front ? state.cards[p.def]?.name ?? '' : 'Card back', draggable: false })
       : h('div.back-default', {}, h('span', {}, 'PAC'));
-    const badges = h('div.badges');
-    for (const [name, n] of Object.entries(p.counters)) {
-      badges.append(h('span.badge.counter', { title: name }, name.length <= 2 ? `${name}${n}` : `${n}`));
-    }
+    const badges = h('div.badges', {}, ...counterBadges(p, state));
     if (p.upgraded) badges.append(h('span.badge.upgraded', { title: 'Upgraded' }, '★'));
     if (p.note) badges.append(h('span.badge.note', { title: p.note }, '✎'));
     if (face.secret) badges.append(h('span.badge.secret', { title: 'Hidden from other players' }, '👁'));

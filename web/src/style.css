@@ -714,7 +714,7 @@ form.inline input {
   padding: 2px 8px;
 }
 
-.size-row span {
+.size-row > span:first-child {
   flex: 1;
 }
 
@@ -754,6 +754,8 @@ form.inline input {
   left: 0;
   top: 0;
   z-index: 1000;
+  /* Cards animate transform (for tapping); the dragged copy must not, or it trails the pointer. */
+  transition: none;
   pointer-events: none;
   opacity: 0.9;
   box-shadow: 0 8px 24px #000a;
@@ -773,16 +775,95 @@ form.inline input {
 .badge {
   background: #000c;
   color: var(--text);
-  border-radius: 8px;
-  padding: 0 5px;
-  font-size: 0.7rem;
-  line-height: 1.4;
+  border-radius: 1em;
+  padding: 0 0.4em;
+  /* Grow with the piece (and stay readable when zoomed out): ~15% of the card's width, but never
+     under 12 screen pixels. --zoom comes from the table; elsewhere it's 1. */
+  font-size: max(calc(12px / var(--zoom, 1)), calc(var(--card-w, 80px) * 0.15));
+  line-height: 1.35;
+  min-width: 1.35em;
+  text-align: center;
+  box-shadow: 0 1px 3px #000a;
 }
 
 .badge.counter {
   background: var(--accent);
   color: #1b150e;
-  font-weight: 700;
+  font-weight: 800;
+}
+
+.preview-img {
+  position: relative;
+}
+
+.preview-badges {
+  top: 8px;
+  right: 8px;
+}
+
+.preview-badges .badge {
+  font-size: 1.1rem;
+}
+
+.counter-block {
+  display: grid;
+}
+
+.counter-dot {
+  width: 14px;
+  height: 14px;
+  padding: 0 !important;
+  border-radius: 50%;
+  border: 2px solid #0008;
+}
+
+.counter-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 8px 6px;
+}
+
+.counter-palette .swatch.active {
+  border-color: var(--text);
+}
+
+.add-counter {
+  display: grid;
+  gap: 2px;
+  padding: 2px 0 4px;
+}
+
+.add-counter-row {
+  display: flex;
+  gap: 4px;
+  padding: 0 8px;
+}
+
+.add-counter-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+}
+
+.add-counter-row button {
+  padding: 2px 8px;
+}
+
+input.pct {
+  width: 4.2rem;
+  padding: 1px 4px;
+  text-align: right;
+}
+
+.pct-sign {
+  color: var(--muted-text);
+  margin-left: -2px;
+}
+
+.map-controls .map-remove {
+  margin-left: 6px;
+  color: #ff9c8a;
 }
 
 .badge.upgraded {
@@ -979,11 +1060,32 @@ dialog.modal label {
 /* ---- Sheet dock ---- */
 
 .sheet-dock {
+  position: relative;
   flex: 0 0 auto;
   background: var(--panel);
   border-radius: var(--radius);
   padding: 4px 6px 6px;
+  margin-top: 14px;
   --card-w: 72px;
+}
+
+.sheet-dock.collapsed {
+  background: none;
+  padding: 0;
+  min-height: 0;
+}
+
+/* Tab on the dock's top edge; stays put whether the dock is open or closed. */
+.dock-handle {
+  position: absolute;
+  left: 50%;
+  top: -22px;
+  transform: translateX(-50%);
+  z-index: 6;
+  padding: 2px 14px;
+  font-size: 0.85rem;
+  border-radius: 6px 6px 0 0;
+  background: var(--panel);
 }
 
 .dock-tabs {
@@ -1109,13 +1211,16 @@ svg.ink .ink-text {
 
 .text-editor {
   position: absolute;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
   z-index: 10000002;
   min-width: 10ch;
   padding: 0 2px;
   margin: -2px 0 0 -3px;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-weight: 700;
-  line-height: 1;
+  line-height: 1.2;
   background: #000a;
   border: 1px dashed var(--accent);
   border-radius: 3px;
@@ -1238,6 +1343,8 @@ svg.ink .ink-text {
 
 .drawer-tab.active {
   border-color: var(--accent);
+  left: min(320px, 85%);
+  z-index: 21;
 }
 
 .drawer {

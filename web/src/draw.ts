@@ -109,7 +109,14 @@ function drawingEl(k: Pick<Stroke, 'color' | 'width' | 'points' | 'shape' | 'fil
   for (const [a, v] of Object.entries(attrs)) el.setAttribute(a, String(v));
   if (shape === 'text') {
     el.classList.add('ink-text');
-    el.textContent = k.text ?? '';
+    // One <tspan> per line; each starts back at the left edge, one line-height down.
+    (k.text ?? '').split('\n').forEach((line, i) => {
+      const span = document.createElementNS(SVG, 'tspan');
+      span.setAttribute('x', String(p[0]));
+      if (i) span.setAttribute('dy', '1.2em');
+      span.textContent = line || ' ';
+      el.append(span);
+    });
   } else {
     el.setAttribute('stroke', k.color);
     el.setAttribute('stroke-width', String(k.width));
@@ -156,7 +163,7 @@ export function createDrawing(surface: HTMLElement, area: HTMLElement, ctx: Draw
     toolBtn('pen', 'Draw', 'Freehand (D)'),
     h('span.tool-group', {}, toolBtn('shape', 'Shape', 'Line, arrow, box or circle (S). Hold Shift for straight lines, squares and circles.'), shapeSel),
     h('label.fill-toggle', { title: 'Fill boxes and circles' }, fillBox, 'Fill'),
-    toolBtn('text', 'Text', 'Click to add text; double-click text to edit it; drag text to move it'),
+    toolBtn('text', 'Text', 'Click to add text (Enter = new line, click away to finish); double-click text to edit it; drag text to move it'),
     toolBtn('erase', 'Erase', 'Erase: click or sweep across a drawing (E)'),
     toolBtn('ping', 'Ping', 'Ping: show everyone a spot (P, or Alt+click)'),
     swatches, widthSel, clearBtn,
@@ -346,17 +353,26 @@ export function createDrawing(surface: HTMLElement, area: HTMLElement, ctx: Draw
     const w = existing?.width ?? width;
     const original = existing && saved.get(existing.id)?.el;
     if (original) original.style.visibility = 'hidden';
-    const input = h('input.text-editor', {
-      value: existing?.text ?? '',
-      maxLength: 200,
-      placeholder: 'Type, then Enter',
+    const input = h('textarea.text-editor', {
+      maxLength: 1000,
+      rows: 1,
+      placeholder: 'Type… (click away to finish)',
       style: { left: `${x}px`, top: `${y}px`, fontSize: `${fontSize(w)}px`, color: c },
     });
+    input.value = existing?.text ?? '';
+    // Grow with the text: as many rows as lines, as wide as the longest line.
+    const fit = () => {
+      const lines = input.value.split('\n');
+      input.rows = Math.max(1, lines.length);
+      input.cols = Math.max(12, ...lines.map((l) => l.length + 1));
+    };
+    input.addEventListener('input', fit);
+    fit();
     let done = false;
     const finish = async (commit: boolean) => {
       if (done) return;
       done = true;
-      const text = input.value.trim();
+      const text = input.value.replace(/\s+$/, '').replace(/^\n+/, '');
       input.remove();
       if (original) original.style.visibility = '';
       if (!commit || !text || text === existing?.text) return;
@@ -370,7 +386,8 @@ export function createDrawing(surface: HTMLElement, area: HTMLElement, ctx: Draw
     };
     input.addEventListener('keydown', (ev) => {
       ev.stopPropagation(); // keep F/T/U/D/E shortcuts out of the text
-      if (ev.key === 'Enter') void finish(true);
+      // Enter is a new line; Ctrl/Cmd+Enter or clicking away finishes; Esc cancels.
+      if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) void finish(true);
       if (ev.key === 'Escape') void finish(false);
     });
     input.addEventListener('blur', () => void finish(true));
@@ -388,22 +405,24 @@ export function createDrawing(surface: HTMLElement, area: HTMLElement, ctx: Draw
     const [sx, sy] = toTable(e);
     let dx = 0;
     let dy = 0;
+    // Each line (<tspan>) carries its own x, so move those along with the text.
+    const place = (x: number, y: number) => {
+      el.setAttribute('x', String(x));
+      el.setAttribute('y', String(y));
+      for (const span of el.querySelectorAll('tspan')) span.setAttribute('x', String(x));
+    };
     const move = (ev: PointerEvent) => {
       const [x, y] = toTable(ev);
       dx = x - sx;
       dy = y - sy;
-      el.setAttribute('x', String(k.points[0] + dx));
-      el.setAttribute('y', String(k.points[1] + dy));
+      place(k.points[0] + dx, k.points[1] + dy);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', () => {
       window.removeEventListener('pointermove', move);
       if (Math.hypot(dx, dy) < 3) return;
       void ctx.act({ kind: 'stroke.update', id, set: { points: [k.points[0] + dx, k.points[1] + dy] } }).then((ok) => {
-        if (!ok) {
-          el.setAttribute('x', String(k.points[0]));
-          el.setAttribute('y', String(k.points[1]));
-        }
+        if (!ok) place(k.points[0], k.points[1]);
       });
     }, { once: true });
   }

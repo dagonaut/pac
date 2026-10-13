@@ -6,6 +6,10 @@ const menu = h('div.menu', { hidden: true });
 document.body.append(menu);
 
 export function closeMenu() {
+  // Let a focused input inside the menu finish its blur/change handlers (which may close the menu
+  // themselves) before its contents are removed.
+  const active = document.activeElement as HTMLElement | null;
+  if (active && menu.contains(active)) active.blur();
   menu.hidden = true;
   menu.replaceChildren();
   if (menu.parentElement !== document.body) document.body.append(menu);

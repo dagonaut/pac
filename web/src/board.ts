@@ -6,7 +6,7 @@ import type { Op, Piece, PieceProps, RoomState, Zone, ZoneKind } from '../../sha
 import { h, shortId } from './dom';
 import { createDrawing } from './draw';
 import { createImages } from './images';
-import { cardName, faceOf, pieceEl, prunePieceEls } from './pieces';
+import { cardName, COUNTER_COLORS, counterBadges, counterColor, faceOf, pieceEl, prunePieceEls } from './pieces';
 import { closeMenu, heading, item, openMenu } from './menu';
 import { renderDock } from './sheets';
 import { systems } from './systems/index';
@@ -146,13 +146,71 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
       closeMenu();
       void update(p.id, { counters });
     };
-    return h('div.counter-row', {},
-      h('span', {}, name),
-      h('button', { type: 'button', onclick: () => set(n - 1) }, '−'),
-      h('b', {}, String(n)),
-      h('button', { type: 'button', onclick: () => set(n + 1) }, '+'),
-      h('button', { type: 'button', title: 'Remove counter', onclick: () => set(null) }, '×'),
-    );
+    const color = counterColor(st(), name);
+    const palette = h('div.counter-palette', { hidden: true }, ...swatches(color, (c) => {
+      closeMenu();
+      void ctx.act({ kind: 'counter.color', name, color: c });
+    }));
+    const dot = h('button.counter-dot', {
+      type: 'button',
+      title: `Color for every "${name}" counter`,
+      style: { background: color },
+      onclick: () => (palette.hidden = !palette.hidden),
+    });
+    return h('div.counter-block', {},
+      h('div.counter-row', {},
+        dot,
+        h('span', {}, name),
+        h('button', { type: 'button', onclick: () => set(n - 1) }, '−'),
+        h('b', {}, String(n)),
+        h('button', { type: 'button', onclick: () => set(n + 1) }, '+'),
+        h('button', { type: 'button', title: 'Remove counter', onclick: () => set(null) }, '×')),
+      palette);
+  }
+
+  function swatches(current: string, pick: (c: string) => void) {
+    return COUNTER_COLORS.map((c) => h('button.swatch', {
+      type: 'button',
+      title: c,
+      className: c === current ? 'active' : '',
+      style: { background: c },
+      onclick: (e: Event) => {
+        e.preventDefault();
+        pick(c);
+      },
+    }));
+  }
+
+  /** "Add counter": a name (existing names are suggested) and a color, remembered per name. */
+  function addCounterForm(p: Piece) {
+    const state = st();
+    const known = [...new Set([...Object.keys(state.counterColors ?? {}), ...Object.values(state.pieces).flatMap((q) => Object.keys(q.counters))])].sort();
+    const listId = `counter-names-${shortId()}`;
+    const name = h('input', { placeholder: 'Name, e.g. poison', maxLength: 30, required: true, list: listId });
+    let chosen = '';
+    const row = h('div.counter-palette');
+    const paint = () => row.replaceChildren(...swatches(chosen || (name.value.trim() ? counterColor(st(), name.value.trim()) : ''), (c) => {
+      chosen = c;
+      paint();
+    }));
+    name.addEventListener('input', () => { chosen = ''; paint(); });
+    paint();
+    return h('form.add-counter', {
+      onsubmit: (e: Event) => {
+        e.preventDefault();
+        const n = name.value.trim().slice(0, 30);
+        if (!n) return;
+        closeMenu();
+        const ops: Op[] = [{ kind: 'piece.update', id: p.id, set: { counters: { ...p.counters, [n]: p.counters[n] ?? 1 } } }];
+        const stored = st().counterColors?.[n];
+        const color = chosen || counterColor(st(), n);
+        if (stored !== color) ops.push({ kind: 'counter.color', name: n, color });
+        void ctx.act(ops.length === 1 ? ops[0] : { kind: 'batch', ops });
+      },
+    },
+      h('datalist', { id: listId }, ...known.map((k) => new Option(k, k))),
+      h('div.add-counter-row', {}, name, h('button', { type: 'submit' }, 'Add')),
+      row);
   }
 
   function sizeRow(p: Piece) {
@@ -161,11 +219,22 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
       closeMenu();
       void update(p.id, { scale: Math.round(Math.min(20, Math.max(0.2, v)) * 100) / 100 });
     };
+    const pct = h('input.pct', { type: 'number', min: '20', max: '2000', step: '5', value: String(Math.round(scale * 100)), title: 'Size in percent' });
+    let committed = false; // Enter and the blur that follows both fire; send once
+    const commit = () => {
+      const v = Number(pct.value);
+      if (committed || !Number.isFinite(v) || v <= 0 || Math.round(v) === Math.round(scale * 100)) return;
+      committed = true;
+      set(v / 100);
+    };
+    pct.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), commit()));
+    pct.addEventListener('change', commit);
     return h('div.size-row', {},
-      h('span', {}, `Size ${Math.round(scale * 100)}%`),
-      h('button', { type: 'button', title: 'Smaller', onclick: () => set(scale / 1.5) }, '−'),
+      h('span', {}, 'Size'),
+      h('button', { type: 'button', title: 'Smaller', onclick: () => set(scale / 1.25) }, '−'),
+      pct, h('span.pct-sign', {}, '%'),
+      h('button', { type: 'button', title: 'Bigger', onclick: () => set(scale * 1.25) }, '+'),
       h('button', { type: 'button', title: 'Normal size', onclick: () => set(1) }, '1×'),
-      h('button', { type: 'button', title: 'Bigger', onclick: () => set(scale * 1.5) }, '+'),
     );
   }
 
@@ -177,11 +246,10 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
       item(p.faceUp ? 'Flip face down' : 'Flip face up', () => update(p.id, { faceUp: !p.faceUp }), { hint: 'F' }),
       item(p.tapped ? 'Untap' : 'Tap', () => update(p.id, { tapped: !p.tapped }), { hint: 'T' }),
       item(p.upgraded ? 'Remove upgrade' : card?.upgraded ? 'Upgrade' : 'Mark upgraded', () => update(p.id, { upgraded: !p.upgraded }), { hint: 'U' }),
+      heading('Counters'),
       ...Object.entries(p.counters).map(([name, n]) => counterRow(p, name, n)),
-      item('Add counter…', () => {
-        const name = prompt('Counter name (e.g. dmg, charge):', 'charge')?.trim().slice(0, 30);
-        if (name) return update(p.id, { counters: { ...p.counters, [name]: p.counters[name] ?? 1 } });
-      }),
+      addCounterForm(p),
+      h('hr'),
       item(p.note ? 'Edit note…' : 'Add note…', () => {
         const note = prompt('Note on this card:', p.note);
         if (note !== null) return update(p.id, { note: note.slice(0, 1000) });
@@ -360,7 +428,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     previewFor = p.id;
     const counters = Object.entries(p.counters).map(([k, v]) => `${k}: ${v}`).join(' · ');
     preview.replaceChildren(
-      h('img', { src: face.src, alt: '' }),
+      h('div.preview-img', {}, h('img', { src: face.src, alt: '' }), h('div.badges.preview-badges', {}, ...counterBadges(p, state))),
       h('div.preview-caption', {}, h('b', {}, state.cards[p.def]?.name ?? ''), counters && h('div', {}, counters), p.note && h('div', {}, p.note)),
     );
     preview.classList.toggle('pinned', pinned);
@@ -420,9 +488,18 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     if (!drag.ghost) {
       if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 5) return;
       const r = drag.el.getBoundingClientRect();
+      const tapped = drag.el.classList.contains('tapped');
+      // The copy follows the pointer, so drop the table position it was cloned with (left/top
+      // would otherwise offset it by wherever the card sits on the table) and draw it upright.
+      const w = tapped ? r.height : r.width;
       drag.ghost = drag.el.cloneNode(true) as HTMLElement;
       drag.ghost.classList.add('ghost');
-      Object.assign(drag.ghost.style, { width: `${r.width}px`, height: `${r.height}px` });
+      drag.ghost.classList.remove('tapped');
+      drag.ghost.style.left = drag.ghost.style.top = drag.ghost.style.zIndex = '';
+      drag.ghost.style.width = `${w}px`;
+      drag.ghost.style.setProperty('--card-w', `${w}px`);
+      drag.offX = Math.min(drag.offX, w - 4);
+      drag.offY = Math.min(drag.offY, (tapped ? r.width : r.height) - 4);
       document.body.append(drag.ghost);
       drag.el.classList.add('dragging');
       hidePreview();

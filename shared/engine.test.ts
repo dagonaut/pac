@@ -345,7 +345,7 @@ test('shapes and text: validated, editable, movable, and they reverse', () => {
     { ...base, id: 'b1', shape: 'rect', points: [0, 0, 1] },
     { ...base, id: 'b2', shape: 'line', points: [0, 0, 1, 1, 2, 2] },
     { ...base, id: 'b3', shape: 'text', points: [0, 0] },
-    { ...base, id: 'b4', shape: 'text', text: 'x'.repeat(201), points: [0, 0] },
+    { ...base, id: 'b4', shape: 'text', text: 'x'.repeat(1001), points: [0, 0] },
     { ...base, id: 'b5', shape: 'line', fill: true, points: [0, 0, 1, 1] },
     { ...base, id: 'b6', shape: 'star', points: [0, 0, 1, 1] },
     { ...base, id: 'b7', shape: 'line', text: 'hi', points: [0, 0, 1, 1] },
@@ -353,4 +353,25 @@ test('shapes and text: validated, editable, movable, and they reverse', () => {
   ]) assert.throws(() => apply(s, { kind: 'stroke.add', stroke: bad as never }), OpError, JSON.stringify(bad));
   assert.throws(() => apply(s, { kind: 'stroke.update', id: 'p1', set: { text: 'no' } }), OpError);
   assert.throws(() => apply(s, { kind: 'stroke.update', id: 't1', set: { points: [1, 2, 3, 4] } }), OpError);
+});
+
+test('counter colors are room-wide, reversible and validated', () => {
+  const s = room();
+  roundTrip(s, { kind: 'counter.color', name: 'poison', color: '#59cd90' });
+  apply(s, { kind: 'counter.color', name: 'poison', color: '#59cd90' });
+  roundTrip(s, { kind: 'counter.color', name: 'poison', color: '#ee6352' });
+  roundTrip(s, { kind: 'counter.color', name: 'poison', color: null });
+  for (const bad of [
+    { kind: 'counter.color', name: '__proto__', color: '#ffffff' },
+    { kind: 'counter.color', name: 'x', color: 'red' },
+    { kind: 'counter.color', name: '', color: '#ffffff' },
+  ] as Op[]) assert.throws(() => apply(structuredClone(s), bad), OpError);
+});
+
+test('text drawings can have several lines', () => {
+  const s = room();
+  const base = { zone: 'board', color: '#ff0000', width: 4, by: 'Ana', shape: 'text' as const, points: [0, 0] };
+  apply(s, { kind: 'stroke.add', stroke: { ...base, id: 't1', text: 'Line one\nLine two\nLine three' } });
+  assert.equal(s.strokes!.t1.text!.split('\n').length, 3);
+  assert.throws(() => apply(s, { kind: 'stroke.add', stroke: { ...base, id: 't2', text: Array(41).fill('x').join('\n') } }), /40 lines/);
 });

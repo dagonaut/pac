@@ -215,20 +215,27 @@ export function renderDock(dock: HTMLElement, state: RoomState, ctx: DockCtx) {
     }, 'My sheet'),
     h('span.spacer'),
     h('button.dock-tab', { type: 'button', title: 'Sheet templates: build, import, export', onclick: () => ctx.openTemplates() }, 'Templates'),
-    h('button.dock-toggle', {
-      type: 'button',
-      title: collapsed ? 'Show sheets' : 'Hide sheets',
-      onclick: () => {
-        collapsed = !collapsed;
-        try {
-          localStorage.setItem('vtt.dockCollapsed', collapsed ? '1' : '0');
-        } catch { /* ignore */ }
-        renderDock(dock, state, ctx);
-      },
-    }, collapsed ? '▴' : '▾'),
   );
 
-  const body = h('div.dock-body', { hidden: collapsed });
+  // A tab on the dock's top edge opens/closes it (like the Chat & dice and Images tabs).
+  const toggle = h('button.dock-handle', {
+    type: 'button',
+    title: collapsed ? 'Show sheets' : 'Hide sheets',
+    onclick: () => {
+      collapsed = !collapsed;
+      try {
+        localStorage.setItem('vtt.dockCollapsed', collapsed ? '1' : '0');
+      } catch { /* ignore */ }
+      renderDock(dock, state, ctx);
+    },
+  }, 'Sheets');
+  dock.classList.toggle('collapsed', collapsed);
+  if (collapsed) {
+    dock.replaceChildren(toggle);
+    return;
+  }
+
+  const body = h('div.dock-body');
   const zones = owned.get(tab!) ?? [];
   if (!zones.length) {
     if (tab === ctx.me) {
@@ -255,7 +262,7 @@ export function renderDock(dock: HTMLElement, state: RoomState, ctx: DockCtx) {
 
   // Don't yank a field out from under someone who is typing in it.
   const focused = dock.querySelector<HTMLInputElement | HTMLTextAreaElement>('input:focus, textarea:focus');
-  dock.replaceChildren(tabs, body);
+  dock.replaceChildren(toggle, tabs, body);
   if (focused?.dataset.field) {
     const fresh = dock.querySelector<HTMLElement>(`[data-field="${CSS.escape(focused.dataset.field)}"]`);
     if (fresh && fresh.tagName === focused.tagName) {

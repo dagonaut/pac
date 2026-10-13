@@ -9,6 +9,12 @@ function scrollToEnd() {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+/** First line of a multi-line text, with "…" if there's more. */
+const firstLine = (t: string) => {
+  const [line, ...rest] = t.split('\n');
+  return rest.some((l) => l.trim()) ? `${line}…` : line;
+};
+
 function describe(op: Op, state: RoomState, me: string, names: Record<string, string> = {}): string {
   // Names recorded when it happened (public cards only), else what you can see now. Face-down or
   // hidden cards aren't spoiled either way.
@@ -64,25 +70,27 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
       return op.set.name ? `renamed an image to ${op.set.name}` : `changed ${name}`;
     }
     case 'image.delete': return 'deleted an image';
-    case 'zone.map': return op.map ? `set the map to ${state.images?.[op.map.image]?.name ?? 'an image'}` : 'removed the map';
+    case 'zone.map': return op.map ? `set the map to ${state.images?.[op.map.image]?.name ?? 'an image'} at ${Math.round(op.map.scale * 100)}%` : 'removed the map';
+    case 'counter.color': return op.color ? `recolored every "${op.name}" counter` : `reset the "${op.name}" counter color`;
     case 'spotlight': return op.spotlight ? `is showing ${state.images?.[op.spotlight.image]?.name ?? 'an image'}` : 'closed the image on screen';
     case 'template.create': return `added the sheet template ${op.template.name}`;
     case 'template.update': return `edited the sheet template ${op.template.name}`;
     case 'template.delete': return 'deleted a sheet template';
     case 'stroke.add': {
       const k = op.stroke;
-      if (k.shape === 'text') return `wrote "${k.text}" on the table`;
+      if (k.shape === 'text') return `wrote "${firstLine(k.text ?? '')}" on the table`;
       const what = { line: 'a line', arrow: 'an arrow', rect: 'a box', ellipse: 'a circle', path: '', text: '' }[k.shape ?? 'path'];
       return what ? `drew ${what} on the table` : 'drew on the table';
     }
     case 'stroke.delete': return 'erased a drawing';
-    case 'stroke.update': return op.set.text !== undefined ? `changed text to "${op.set.text}"` : 'moved a drawing';
+    case 'stroke.update': return op.set.text !== undefined ? `changed text to "${firstLine(op.set.text)}"` : 'moved a drawing';
     case 'batch': {
       if (op.ops.length && op.ops.every((o) => o.kind === 'stroke.delete')) return `cleared ${op.ops.length} drawing${op.ops.length === 1 ? '' : 's'}`;
       if (op.ops.length && op.ops.every((o) => o.kind === 'image.create')) return `uploaded ${op.ops.length} image${op.ops.length === 1 ? '' : 's'}`;
-      // An image reveal plus the action that used it (map, spotlight, put on table): describe the action.
-      if (op.ops.some((o) => o.kind === 'image.update')) {
-        const main = op.ops.filter((o) => o.kind !== 'image.update' && o.kind !== 'card.create');
+      // A side effect plus the main action (an image reveal + set map, a counter color + add counter):
+      // describe the main action.
+      if (op.ops.some((o) => o.kind === 'image.update' || o.kind === 'counter.color')) {
+        const main = op.ops.filter((o) => o.kind !== 'image.update' && o.kind !== 'card.create' && o.kind !== 'counter.color');
         if (main.length === 1) return describe(main[0], state, me, names);
       }
       const fromImage = op.ops.find((o) => o.kind === 'card.create' && o.card.id.startsWith('card-img-'));
