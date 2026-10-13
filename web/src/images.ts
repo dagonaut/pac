@@ -16,6 +16,7 @@ export interface ImagesCtx {
   tableZone(): string | undefined;
   /** Middle of the visible table, in table coordinates. */
   visibleCenter(): { x: number; y: number };
+  zoom(): number;
   tableSize: { w: number; h: number };
 }
 
@@ -90,10 +91,14 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
   const reveal = (img: ImageDef): Op[] => (img.hidden ? [{ kind: 'image.update', id: img.id, set: { hidden: false } }] : []);
   const send = (ops: Op[]) => ctx.act(ops.length === 1 ? ops[0] : { kind: 'batch', ops });
 
-  function fitScale(thumbImg: HTMLImageElement | null) {
-    const w = thumbImg?.naturalWidth || ctx.tableSize.w;
-    const hgt = thumbImg?.naturalHeight || ctx.tableSize.h;
-    return Math.round(Math.min(1, ctx.tableSize.w / w, ctx.tableSize.h / hgt) * 100) / 100 || 1;
+  /** A new map: shrunk to fit the table if it's bigger, and centered on the table. */
+  function placeMap(image: string, thumbImg: HTMLImageElement | null) {
+    const nw = thumbImg?.naturalWidth || ctx.tableSize.w;
+    const nh = thumbImg?.naturalHeight || ctx.tableSize.h;
+    const scale = Math.round(Math.min(1, ctx.tableSize.w / nw, ctx.tableSize.h / nh) * 100) / 100 || 1;
+    const x = Math.max(0, Math.round((ctx.tableSize.w - nw * scale) / 2));
+    const y = Math.max(0, Math.round((ctx.tableSize.h - nh * scale) / 2));
+    return { image, scale, x, y };
   }
 
   function imageMenu(img: ImageDef, anchorEl: HTMLElement) {
@@ -107,7 +112,7 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
       item('View', () => lightbox(img.src, img.name)),
       !!zone && canMap() && (isMap
         ? item('Remove from the table', () => confirm(`Remove the map "${img.name}" from the table?`) && ctx.act({ kind: 'zone.map', id: zone, map: null }))
-        : item('Set as map', () => send([...reveal(img), { kind: 'zone.map', id: zone, map: { image: img.id, scale: fitScale(anchorEl.querySelector('img')) } }]))),
+        : item('Set as map', () => send([...reveal(img), { kind: 'zone.map', id: zone, map: placeMap(img.id, anchorEl.querySelector('img')) }]))),
       item('Show to everyone', () => send([...reveal(img), { kind: 'spotlight', spotlight: { image: img.id, by: me() } }])),
       !!zone && item('Put on the table', () => {
         const cardId = `card-img-${img.id}`.slice(0, 64);
@@ -267,8 +272,18 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
     const map = z ? st().zones[z]?.map : undefined;
     if (!z || !map) return;
     const s = Math.round(Math.min(10, Math.max(0.1, scale)) * 100) / 100;
-    if (s !== map.scale) void ctx.act({ kind: 'zone.map', id: z, map: { image: map.image, scale: s } });
-    else mapPct.value = String(Math.round(map.scale * 100));
+    if (s === map.scale) {
+      mapPct.value = String(Math.round(map.scale * 100));
+      return;
+    }
+    // Resize around the map's center, so it grows/shrinks in place instead of from its corner.
+    const nw = mapImg.naturalWidth;
+    const nh = mapImg.naturalHeight;
+    const cx = (map.x ?? 0) + (nw * map.scale) / 2;
+    const cy = (map.y ?? 0) + (nh * map.scale) / 2;
+    const x = nw ? Math.max(0, Math.round(cx - (nw * s) / 2)) : map.x ?? 0;
+    const y = nh ? Math.max(0, Math.round(cy - (nh * s) / 2)) : map.y ?? 0;
+    void ctx.act({ kind: 'zone.map', id: z, map: { image: map.image, scale: s, x, y } });
   }
 
   function scaleMap(f: number) {
@@ -277,13 +292,27 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
     if (map) setMapScale(map.scale * f);
   }
 
-  function sizeMap(scale: number) {
-    const w = mapImg.naturalWidth * scale;
-    const hgt = mapImg.naturalHeight * scale;
+  // The map image we last scrolled everyone's view to; a different one (a new map, or joining a
+  // room that has one) brings the view to it. Resizing doesn't move anyone's view.
+  let centeredOn = '';
+
+  function sizeMap(map: { image: string; scale: number; x?: number; y?: number }) {
+    const x = map.x ?? 0;
+    const y = map.y ?? 0;
+    const w = mapImg.naturalWidth * map.scale;
+    const hgt = mapImg.naturalHeight * map.scale;
     mapImg.style.width = `${w}px`;
-    // Let the table grow to fit a big map.
-    surface.style.width = `${Math.max(ctx.tableSize.w, Math.ceil(w))}px`;
-    surface.style.height = `${Math.max(ctx.tableSize.h, Math.ceil(hgt))}px`;
+    mapImg.style.left = `${x}px`;
+    mapImg.style.top = `${y}px`;
+    // Let the table grow to fit a big (or far-placed) map.
+    surface.style.width = `${Math.max(ctx.tableSize.w, Math.ceil(x + w))}px`;
+    surface.style.height = `${Math.max(ctx.tableSize.h, Math.ceil(y + hgt))}px`;
+    if (centeredOn !== map.image && w > 0) {
+      centeredOn = map.image;
+      const wrap = surface.parentElement!;
+      const z = ctx.zoom();
+      wrap.scrollTo({ left: (x + w / 2) * z - wrap.clientWidth / 2, top: (y + hgt / 2) * z - wrap.clientHeight / 2, behavior: 'smooth' });
+    }
   }
 
   function renderMap(state: RoomState) {
@@ -294,6 +323,7 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
       mapImg.hidden = true;
       mapImg.removeAttribute('src');
       mapBox.hidden = true;
+      centeredOn = '';
       surface.style.width = `${ctx.tableSize.w}px`;
       surface.style.height = `${ctx.tableSize.h}px`;
       return;
@@ -301,9 +331,9 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
     mapImg.hidden = false;
     mapBox.hidden = !(!state.gm || state.gm === me());
     if (document.activeElement !== mapPct) mapPct.value = String(Math.round(map.scale * 100));
-    mapImg.onload = () => sizeMap(map.scale);
+    mapImg.onload = () => sizeMap(map);
     if (mapImg.getAttribute('src') !== img.src) mapImg.src = img.src;
-    else if (mapImg.complete && mapImg.naturalWidth) sizeMap(map.scale);
+    else if (mapImg.complete && mapImg.naturalWidth) sizeMap(map);
   }
 
   function render(state: RoomState) {

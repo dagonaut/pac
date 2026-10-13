@@ -63,10 +63,13 @@ function checkTemplate(t: SheetTemplate, id: string): SheetTemplate {
 }
 
 function checkMap(m: unknown, state: RoomState) {
-  const map = m as { image?: unknown; scale?: unknown };
-  if (!map || typeof map !== 'object' || Object.keys(map).some((k) => k !== 'image' && k !== 'scale')) fail('Bad map.');
+  const map = m as { image?: unknown; scale?: unknown; x?: unknown; y?: unknown };
+  if (!map || typeof map !== 'object' || Object.keys(map).some((k) => !['image', 'scale', 'x', 'y'].includes(k))) fail('Bad map.');
   if (!own(state.images, map.image)) fail('That map image is not in the library.');
   if (!isNum(map.scale) || map.scale < 0.1 || map.scale > 10) fail('Map size must be between 10% and 1000%.');
+  for (const v of [map.x, map.y]) {
+    if (v !== undefined && !(Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 20000)) fail('Bad map position.');
+  }
 }
 
 /** Is an image in use (as a map or the spotlight)? Those can't be deleted. */
@@ -400,7 +403,11 @@ export function apply(state: RoomState, op: Op): Op | null {
       if (zone.kind !== 'board') fail('Only a table can have a map.');
       if (op.map !== null) checkMap(op.map, state);
       const prev = zone.map ? { ...zone.map } : null;
-      if (op.map) zone.map = { image: op.map.image, scale: op.map.scale };
+      if (op.map) {
+        zone.map = { image: op.map.image, scale: op.map.scale };
+        if (op.map.x) zone.map.x = op.map.x;
+        if (op.map.y) zone.map.y = op.map.y;
+      }
       else delete zone.map;
       return { kind: 'zone.map', id: op.id, map: prev };
     }

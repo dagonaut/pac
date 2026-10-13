@@ -375,3 +375,15 @@ test('text drawings can have several lines', () => {
   assert.equal(s.strokes!.t1.text!.split('\n').length, 3);
   assert.throws(() => apply(s, { kind: 'stroke.add', stroke: { ...base, id: 't2', text: Array(41).fill('x').join('\n') } }), /40 lines/);
 });
+
+test('maps can be placed; placement is validated and reverses', () => {
+  const s = room();
+  apply(s, { kind: 'image.create', image: { id: 'im1', name: 'Crypt', src: '/assets/r/crypt.png', kind: 'map', hidden: false, by: 'Ana' } });
+  roundTrip(s, { kind: 'zone.map', id: 'board', map: { image: 'im1', scale: 1, x: 1200, y: 600 } });
+  apply(s, { kind: 'zone.map', id: 'board', map: { image: 'im1', scale: 1, x: 1200, y: 600 } });
+  assert.deepEqual(s.zones.board.map, { image: 'im1', scale: 1, x: 1200, y: 600 });
+  roundTrip(s, { kind: 'zone.map', id: 'board', map: { image: 'im1', scale: 2, x: 800, y: 300 } });
+  for (const bad of [{ x: -5 }, { x: 1.5 }, { y: 99999 }, { z: 1 }]) {
+    assert.throws(() => apply(s, { kind: 'zone.map', id: 'board', map: { image: 'im1', scale: 1, ...bad } as never }), OpError, JSON.stringify(bad));
+  }
+});

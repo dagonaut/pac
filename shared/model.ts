@@ -19,9 +19,18 @@ export interface Zone {
   /** Free-form values shown with the zone, e.g. a sheet's HP or Charge. */
   fields?: Record<string, string>;
   /** Background image for a board zone (an entry in RoomState.images), drawn under everything. */
-  map?: { image: string; scale: number };
+  map?: MapPlacement;
   /** Sheet template (an entry in RoomState.templates) this slots zone was made from. */
   template?: string;
+}
+
+/** A board's background map: which image, its size, and where its top-left corner sits on the
+ *  table (x/y default to 0 for maps set before placement existed). */
+export interface MapPlacement {
+  image: string;
+  scale: number;
+  x?: number;
+  y?: number;
 }
 
 /** A map or handout in the room's image library. */
@@ -151,7 +160,7 @@ export type Op =
   /** Only for images not in use as a map or spotlight. */
   | { kind: 'image.delete'; id: string }
   /** Set (or clear, with null) a board zone's background map. */
-  | { kind: 'zone.map'; id: string; map: { image: string; scale: number } | null }
+  | { kind: 'zone.map'; id: string; map: MapPlacement | null }
   | { kind: 'spotlight'; spotlight: { image: string; by: string } | null }
   /** Set (or clear, with null) the color for a counter name, room-wide. */
   | { kind: 'counter.color'; name: string; color: string | null }

@@ -102,6 +102,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     token: ctx.token,
     tableZone: () => surface.dataset.zone,
     visibleCenter: () => visibleCenter(),
+    zoom: () => zoom,
     tableSize: { w: TABLE_W, h: TABLE_H },
   });
 
@@ -539,7 +540,8 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
       const x = Math.round((e.clientX - d.offX - r.left) / zoom);
       const y = Math.round((e.clientY - d.offY - r.top) / zoom);
       const s = (v: number) => (snap ? Math.round(v / GRID) * GRID : v);
-      const pos = { x: Math.max(0, Math.min(TABLE_W - CARD_W, s(x))), y: Math.max(0, Math.min(TABLE_H - CARD_W, s(y))) };
+      // The table can be bigger than its default when a large map is set.
+      const pos = { x: Math.max(0, Math.min(surface.offsetWidth - CARD_W, s(x))), y: Math.max(0, Math.min(surface.offsetHeight - CARD_W, s(y))) };
       return zone.id === p.zone ? pos : moveSet(p, zone, pos);
     }
     if (zone.kind === 'deck' || zone.kind === 'discard') return moveSet(p, zone);

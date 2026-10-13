@@ -289,6 +289,16 @@ await bo.waitForFunction(() => {
 });
 await bo.waitForSelector('.image-grid figure:not(.hidden-image)'); // setting the map revealed it
 await untilLog(bo, 'set the map to');
+// The map lands in the middle of the table, and Bo's view scrolls to it.
+await bo.waitForFunction(() => {
+  const m = (document.querySelector('img.map') as HTMLElement).getBoundingClientRect();
+  const v = (document.querySelector('.table-wrap') as HTMLElement).getBoundingClientRect();
+  const cx = m.x + m.width / 2;
+  const cy = m.y + m.height / 2;
+  return cx > v.x && cx < v.x + v.width && cy > v.y && cy < v.y + v.height;
+}, null, { timeout: 5000 });
+assert.ok(Number.parseInt(await bo.locator('img.map').evaluate((e) => (e as HTMLElement).style.left), 10) > 0, 'map is placed away from the corner');
+await shot(bo, '08a-map-centered');
 
 // Map size: typed %; the controls hide from players once someone holds the GM seat.
 await ana.fill('.map-controls input.pct', '50');
