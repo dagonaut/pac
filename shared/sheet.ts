@@ -4,8 +4,8 @@
 // values in the zone's `fields` (as strings) and its cards in the zone's slots.
 import { roll } from './dice.ts';
 
-export type FieldType = 'number' | 'text' | 'longtext' | 'checkbox' | 'select' | 'track' | 'die';
-export const FIELD_TYPES: FieldType[] = ['number', 'text', 'longtext', 'checkbox', 'select', 'track', 'die'];
+export type FieldType = 'number' | 'text' | 'longtext' | 'checkbox' | 'select' | 'track' | 'die' | 'image';
+export const FIELD_TYPES: FieldType[] = ['number', 'text', 'longtext', 'checkbox', 'select', 'track', 'die', 'image'];
 export const DICE = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'];
 
 export interface FieldDef {
@@ -125,6 +125,7 @@ export function templateErrors(t: unknown): string[] {
           f.type === 'track' ? Number.isInteger(d) && (d as number) >= 0 && (d as number) <= (f.boxes ?? 0) :
           f.type === 'select' ? Array.isArray(f.options) && f.options.includes(d as string) :
           f.type === 'die' ? DICE.includes(d as string) :
+          f.type === 'image' ? false : // images are picked per sheet, never a template default
           typeof d === 'string' && d.length <= (f.type === 'longtext' ? 4000 : 500);
         if (!ok) errs.push(`${w}: "default" doesn't fit a ${f.type} field.`);
       }

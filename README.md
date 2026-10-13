@@ -50,6 +50,7 @@ A template is the shape of a character sheet, stored as JSON. Build one in the a
 | `select` | dropdown | `options` (required), `default` |
 | `track` | row of boxes (harm, stress) | `boxes` (required), `default` (filled count) |
 | `die` | d4–d20 picker; click the label to roll it | `default` (e.g. `"d8"`) |
+| `image` | a round picture (e.g. a portrait) each player picks for their own sheet: upload one or choose from the room's Images | none (only this room's uploads are accepted) |
 
 Any field can have a `hint` (small help text under it, e.g. "Awareness, understanding, smarts"), and any section a `note` (rules or instructions under its title).
 

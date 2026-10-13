@@ -22,6 +22,7 @@ const TYPE_NAMES: Record<FieldType, string> = {
   select: 'Choice from a list',
   track: 'Track of boxes (harm, stress)',
   die: 'Die size (d4–d20, click to roll)',
+  image: 'Picture (e.g. a portrait)',
 };
 
 const slug = (s: string, max = 32) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, max);

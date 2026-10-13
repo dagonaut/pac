@@ -722,6 +722,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
 
     renderDock(dock, state, {
       me: me(),
+      upload: ctx.upload,
       renderZone,
       zoneHeader: (z, count) => zoneHeader(z, count, true),
       openTemplates: ctx.openTemplates,

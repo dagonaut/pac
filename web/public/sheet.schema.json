@@ -123,9 +123,10 @@
             "checkbox",
             "select",
             "track",
-            "die"
+            "die",
+            "image"
           ],
-          "description": "number: +/- buttons (and optional dice roll); text: one line; longtext: notes; checkbox: on/off; select: pick from options; track: a row of boxes (harm, stress); die: d4\u2013d20 picker you can click to roll."
+          "description": "number: +/- buttons (and optional dice roll); text: one line; longtext: notes; checkbox: on/off; select: pick from options; track: a row of boxes (harm, stress); die: d4\u2013d20 picker you can click to roll; image: a picture (e.g. a portrait) each player picks for their own sheet."
         },
         "default": {
           "type": [

@@ -270,6 +270,10 @@ export function apply(state: RoomState, op: Op): Op | null {
       const zone = own(state.zones, op.zone) ?? fail(`No zone ${op.zone}.`);
       if (op.value !== null) checkField(op.key, op.value);
       else if (!isKey(op.key, 40)) fail('Bad field name.');
+      // An image field (e.g. a portrait) may only point at this room's uploads, like card art.
+      const tpl = zone.template ? own(state.templates, zone.template) : undefined;
+      const def = tpl?.sections.flatMap((s) => s.fields ?? []).find((f) => f.id === op.key);
+      if (def?.type === 'image' && op.value && !isArt(op.value, state)) fail('A portrait must be an image uploaded to this room.');
       const fields = (zone.fields ??= {});
       const has = Object.hasOwn(fields, op.key);
       const prev = has ? fields[op.key] : null;

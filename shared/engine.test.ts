@@ -393,3 +393,14 @@ test('templates accept field hints and section notes', () => {
   assert.deepEqual(templateErrors(t), []);
   assert.match(templateErrors({ ...t, sections: [{ ...t.sections[0], note: 'x'.repeat(601) }] }).join(), /note/);
 });
+
+test('image fields (portraits) only accept this room\'s uploads', () => {
+  const s = room();
+  const tpl: SheetTemplateFile & { id: string } = { id: 'tpl-p', name: 'P', sections: [{ title: 'Who', fields: [{ id: 'portrait', label: 'Portrait', type: 'image' }] }] };
+  apply(s, { kind: 'template.create', template: tpl });
+  apply(s, { kind: 'zone.create', zone: { id: 'sheet-a', kind: 'slots', label: 'P', owner: 'Ana', template: 'tpl-p', fields: defaultValues(tpl) } });
+  roundTrip(s, { kind: 'field.set', zone: 'sheet-a', key: 'portrait', value: '/assets/r/me.png' });
+  assert.throws(() => apply(s, { kind: 'field.set', zone: 'sheet-a', key: 'portrait', value: 'https://evil.example/x.png' }), /portrait/);
+  roundTrip(s, { kind: 'field.set', zone: 'sheet-a', key: 'portrait', value: '' });
+  assert.match(templateErrors({ ...tpl, sections: [{ title: 'x', fields: [{ id: 'p', type: 'image', default: '/a.png' }] }] }).join(), /default/);
+});

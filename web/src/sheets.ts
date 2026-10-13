@@ -10,6 +10,8 @@ import { systems } from './systems/index';
 
 export interface DockCtx {
   me: string;
+  /** Upload an image; resolves to its /assets/... path. */
+  upload(file: File): Promise<string>;
   renderZone(z: Zone, state: RoomState): HTMLElement;
   zoneHeader(z: Zone, count: number): HTMLElement;
   act(op: Op): Promise<boolean>;
@@ -56,14 +58,19 @@ function fieldsEditor(z: Zone, ctx: DockCtx) {
 
 // ---- Templated sheets -----------------------------------------------------------------------
 
+/** Opens a picker for an image field; calls `set` with the chosen /assets/... path ('' clears). */
+export type PickImage = (anchor: DOMRect, current: string, set: (v: string) => void) => void;
+
+const isRoomArt = (v: string) => /^\/assets\/[a-z0-9-]+\/[\w-]+\.(png|jpg|webp|gif|avif)$/.test(v);
+
 /** One field's control, with its hint (if any) underneath. */
-export function fieldControl(f: FieldDef, value: string, set: (v: string) => void, roll: (expr: string, label: string) => void, key: string): HTMLElement {
-  const control = controlFor(f, value, set, roll, key);
+export function fieldControl(f: FieldDef, value: string, set: (v: string) => void, roll: (expr: string, label: string) => void, key: string, pick?: PickImage): HTMLElement {
+  const control = controlFor(f, value, set, roll, key, pick);
   return f.hint ? h('div.sf-wrap', {}, control, h('small.sf-hint', {}, f.hint)) : control;
 }
 
 /** `set` stores a value; `roll` sends a labelled roll to the table. */
-function controlFor(f: FieldDef, value: string, set: (v: string) => void, roll: (expr: string, label: string) => void, key: string): HTMLElement {
+function controlFor(f: FieldDef, value: string, set: (v: string) => void, roll: (expr: string, label: string) => void, key: string, pick?: PickImage): HTMLElement {
   const label = f.label ?? f.id;
   const data = { dataset: { field: key } };
   switch (f.type) {
@@ -113,6 +120,17 @@ function controlFor(f: FieldDef, value: string, set: (v: string) => void, roll: 
         }));
       return h('div.sf.sf-track', {}, h('label', {}, label), h('span.track', {}, ...boxes));
     }
+    case 'image': {
+      // Only this room's uploads are shown (the server enforces the same rule).
+      const has = isRoomArt(value);
+      const btn = h('button.portrait', {
+        type: 'button',
+        title: pick ? (has ? 'Change or remove the picture' : 'Add a picture') : label,
+        disabled: !pick,
+      }, has ? h('img', { src: value, alt: label }) : h('span', {}, pick ? `+ ${label}` : label));
+      btn.addEventListener('click', () => pick?.(btn.getBoundingClientRect(), value, set));
+      return h('div.sf.sf-image', {}, btn);
+    }
     case 'die': {
       const die = DICE.includes(value) ? value : 'd6';
       const sel = h('select', { ...data, onchange: () => set(sel.value) }, ...DICE.map((d) => new Option(d, d, false, d === die)));
@@ -132,9 +150,33 @@ function renderTemplated(z: Zone, tpl: SheetTemplate, state: RoomState, ctx: Doc
   const pieces = Object.values(state.pieces).filter((p) => p.zone === z.id).sort((a, b) => a.index - b.index);
 
   let slotIndex = 0;
+  const pick: PickImage = (anchor, current, setValue) => {
+    const images = Object.values(state.images ?? {}).filter((i) => !i.hidden || state.gm === ctx.me || i.by === ctx.me);
+    const upload = () => {
+      const input = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif,image/avif' });
+      input.addEventListener('change', async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        try {
+          setValue(await ctx.upload(file));
+        } catch (e) {
+          alert((e as Error).message);
+        }
+      });
+      input.click();
+    };
+    openMenu(anchor,
+      heading('Picture'),
+      item('Upload a picture…', upload),
+      images.length > 0 && heading('From Images'),
+      ...images.slice(0, 30).map((i) => item(i.name, () => setValue(i.src))),
+      !!current && h('hr'),
+      !!current && item('Remove picture', () => setValue(''), { danger: true }),
+    );
+  };
   const sections = tpl.sections.map((s) => {
     const fields = (s.fields ?? []).map((f) =>
-      fieldControl(f, z.fields?.[f.id] ?? defaults[f.id] ?? '', set(f.id), roll, `${z.id}/${f.id}`));
+      fieldControl(f, z.fields?.[f.id] ?? defaults[f.id] ?? '', set(f.id), roll, `${z.id}/${f.id}`, pick));
     const cells = (s.slots ?? []).flatMap((sl) => Array.from({ length: sl.count ?? 1 }, () => {
       const i = slotIndex++;
       const cell = h('div.slot', { dataset: { slot: String(i) } }, h('small.slot-label', {}, sl.label));
