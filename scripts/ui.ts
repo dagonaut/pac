@@ -240,6 +240,20 @@ await ana.mouse.up();
 await bo.waitForSelector('svg.ink rect[data-stroke]', { state: 'attached' });
 await untilLog(bo, 'drew a box');
 
+// Still on the Shape tool: grab the box by its edge and drag it somewhere else.
+const boxEl = ana.locator('svg.ink rect[data-stroke]');
+const bb = (await boxEl.boundingBox())!;
+const boxX = await bo.locator('svg.ink rect[data-stroke]').getAttribute('x');
+await ana.mouse.move(bb.x + 1, bb.y + bb.height / 2); // on the outline (it isn't filled)
+await ana.mouse.down();
+await ana.mouse.move(bb.x + 101, bb.y + bb.height / 2 + 30, { steps: 8 });
+await ana.mouse.up();
+await bo.waitForFunction((x) => {
+  const r = document.querySelector('svg.ink rect[data-stroke]');
+  return !!r && Number(r.getAttribute('x')) - Number(x) === 100;
+}, boxX);
+assert.equal(await ana.locator('svg.ink rect').count(), 1, 'moving a box must not draw a new one');
+
 await ana.click('.draw-tools .tool[data-tool=text]');
 await ana.mouse.click(t.x + 650, t.y + 80);
 await ana.keyboard.type('Goblins');

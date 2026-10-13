@@ -1194,6 +1194,16 @@ svg.ink {
   cursor: move;
 }
 
+/* Shape tool: grab an existing line or shape (its outline, or its fill if filled) to move it. */
+.table-surface[data-tool='shape'] svg.ink [data-stroke]:not(text) {
+  pointer-events: visiblePainted;
+  cursor: move;
+}
+
+svg.ink .moving {
+  opacity: 0.7;
+}
+
 .table-surface[data-tool='text'],
 .table-surface[data-tool='shape'] {
   cursor: crosshair;

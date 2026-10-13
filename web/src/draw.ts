@@ -161,7 +161,7 @@ export function createDrawing(surface: HTMLElement, area: HTMLElement, ctx: Draw
   const toolbar = h('div.draw-tools', {},
     toolBtn('select', 'Move', 'Move cards and pan (Esc)'),
     toolBtn('pen', 'Draw', 'Freehand (D)'),
-    h('span.tool-group', {}, toolBtn('shape', 'Shape', 'Line, arrow, box or circle (S). Hold Shift for straight lines, squares and circles.'), shapeSel),
+    h('span.tool-group', {}, toolBtn('shape', 'Shape', 'Line, arrow, box or circle (S). Hold Shift for straight lines, squares and circles. Drag an existing shape or line to move it.'), shapeSel),
     h('label.fill-toggle', { title: 'Fill boxes and circles' }, fillBox, 'Fill'),
     toolBtn('text', 'Text', 'Click to add text (Enter = new line, click away to finish); double-click text to edit it; drag text to move it'),
     toolBtn('erase', 'Erase', 'Erase: click or sweep across a drawing (E)'),
@@ -256,7 +256,7 @@ export function createDrawing(surface: HTMLElement, area: HTMLElement, ctx: Draw
       e.stopPropagation();
       e.preventDefault();
       const hit = (e.target as Element).closest?.('text[data-stroke]');
-      if (hit) moveText(hit.getAttribute('data-stroke')!, e);
+      if (hit) moveDrawing(hit.getAttribute('data-stroke')!, e);
       else {
         const [x, y] = toTable(e);
         editText(zone, x, y);
@@ -266,7 +266,10 @@ export function createDrawing(surface: HTMLElement, area: HTMLElement, ctx: Draw
     if (tool === 'shape') {
       e.stopPropagation();
       e.preventDefault();
-      drawShape(zone, e);
+      // Grabbing an existing line or shape moves it; empty table draws a new shape.
+      const hit = (e.target as Element).closest?.('[data-stroke]:not(text)');
+      if (hit) moveDrawing(hit.getAttribute('data-stroke')!, e);
+      else drawShape(zone, e);
       return;
     }
     if (tool !== 'pen') return;
@@ -397,32 +400,33 @@ export function createDrawing(surface: HTMLElement, area: HTMLElement, ctx: Draw
     input.focus();
   }
 
-  /** Drag a text label to move it; a click without moving does nothing (double-click edits). */
-  function moveText(id: string, e: PointerEvent) {
+  /** Drag a drawing to move it: shown with a transform while dragging, saved as shifted points on
+   *  release. A click without moving does nothing (so double-clicking text still edits it). */
+  function moveDrawing(id: string, e: PointerEvent) {
     const k = ctx.state()?.strokes?.[id];
     const el = saved.get(id)?.el;
     if (!k || !el) return;
     const [sx, sy] = toTable(e);
     let dx = 0;
     let dy = 0;
-    // Each line (<tspan>) carries its own x, so move those along with the text.
-    const place = (x: number, y: number) => {
-      el.setAttribute('x', String(x));
-      el.setAttribute('y', String(y));
-      for (const span of el.querySelectorAll('tspan')) span.setAttribute('x', String(x));
-    };
+    el.classList.add('moving');
     const move = (ev: PointerEvent) => {
       const [x, y] = toTable(ev);
       dx = x - sx;
       dy = y - sy;
-      place(k.points[0] + dx, k.points[1] + dy);
+      el.setAttribute('transform', `translate(${dx} ${dy})`);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', () => {
       window.removeEventListener('pointermove', move);
-      if (Math.hypot(dx, dy) < 3) return;
-      void ctx.act({ kind: 'stroke.update', id, set: { points: [k.points[0] + dx, k.points[1] + dy] } }).then((ok) => {
-        if (!ok) place(k.points[0], k.points[1]);
+      el.classList.remove('moving');
+      if (Math.hypot(dx, dy) < 3) {
+        el.removeAttribute('transform');
+        return;
+      }
+      const points = k.points.map((v, i) => v + (i % 2 ? dy : dx));
+      void ctx.act({ kind: 'stroke.update', id, set: { points } }).then((ok) => {
+        if (!ok) el.removeAttribute('transform'); // on success the redrawn element replaces this one
       });
     }, { once: true });
   }
