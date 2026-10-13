@@ -56,8 +56,14 @@ function fieldsEditor(z: Zone, ctx: DockCtx) {
 
 // ---- Templated sheets -----------------------------------------------------------------------
 
-/** One field's control. `set` stores a value; `roll` sends a labelled roll to the table. */
-export function fieldControl(f: FieldDef, value: string, set: (v: string) => void, roll: (expr: string, label: string) => void, key: string) {
+/** One field's control, with its hint (if any) underneath. */
+export function fieldControl(f: FieldDef, value: string, set: (v: string) => void, roll: (expr: string, label: string) => void, key: string): HTMLElement {
+  const control = controlFor(f, value, set, roll, key);
+  return f.hint ? h('div.sf-wrap', {}, control, h('small.sf-hint', {}, f.hint)) : control;
+}
+
+/** `set` stores a value; `roll` sends a labelled roll to the table. */
+function controlFor(f: FieldDef, value: string, set: (v: string) => void, roll: (expr: string, label: string) => void, key: string): HTMLElement {
   const label = f.label ?? f.id;
   const data = { dataset: { field: key } };
   switch (f.type) {
@@ -137,6 +143,7 @@ function renderTemplated(z: Zone, tpl: SheetTemplate, state: RoomState, ctx: Doc
     }));
     return h('section.sheet-section', {},
       s.title && h('h4', {}, s.title),
+      s.note && h('p.sheet-note', {}, s.note),
       fields.length > 0 && h('div.sheet-fields', {}, ...fields),
       cells.length > 0 && h('div.strip-cards', {}, ...cells));
   });

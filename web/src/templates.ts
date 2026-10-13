@@ -53,6 +53,7 @@ function preview(t: SheetTemplateFile) {
     h('div.zone-head', {}, h('span', {}, t.name || 'Untitled')),
     h('div.sheet-sections', {}, ...(Array.isArray(t.sections) ? t.sections : []).map((s) => h('section.sheet-section', {},
       s?.title && h('h4', {}, s.title),
+      typeof s?.note === 'string' && s.note && h('p.sheet-note', {}, s.note),
       (s?.fields?.length ?? 0) > 0 && h('div.sheet-fields', {}, ...(s.fields ?? []).map((f) => {
         try {
           const d = f.default ?? (f.type === 'select' ? f.options?.[0] : f.type === 'die' ? 'd6' : '');
@@ -163,6 +164,7 @@ export function createTemplates(ctx: TemplatesCtx) {
         name: t.name,
         sections: t.sections.map((s) => ({
           title: s.title,
+          ...(s.note ? { note: s.note } : {}),
           ...(s.fields?.length ? { fields: s.fields.map((f) => Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined && v !== '' && !(Array.isArray(v) && !v.length))) as unknown as FieldDef) } : {}),
           ...(s.slots?.length ? { slots: s.slots } : {}),
         })),
@@ -312,7 +314,8 @@ export function createTemplates(ctx: TemplatesCtx) {
           break;
         }
       }
-      return h('div.field-row', {}, h('div.field-main', {}, label, type, idInput, tools(s.fields!, i, 'field')), opts.length > 0 && h('div.field-opts', {}, ...opts));
+      opts.push(labeled('Hint', text(f.hint, (v) => (f.hint = v || undefined), { placeholder: 'Help text shown under it (optional)', className: 'wide', maxLength: 300 })));
+      return h('div.field-row', {}, h('div.field-main', {}, label, type, idInput, tools(s.fields!, i, 'field')), h('div.field-opts', {}, ...opts));
     }
 
     function slotRow(s: Section, sl: { id: string; label: string; count?: number }, i: number) {
@@ -332,6 +335,7 @@ export function createTemplates(ctx: TemplatesCtx) {
         h('div.section-head', {},
           text(s.title, (v) => (s.title = v), { placeholder: 'Section title', className: 'section-title' }),
           tools(draft.sections, si, 'section')),
+        text(s.note, (v) => (s.note = v || undefined), { placeholder: 'Section note: rules or instructions (optional)', className: 'section-note', maxLength: 600 }),
         ...(s.fields ?? []).map((f, i) => fieldRow(s, f, i)),
         ...(s.slots ?? []).map((sl, i) => slotRow(s, sl, i)),
         h('div.add-row', {},

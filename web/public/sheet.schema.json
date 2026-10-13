@@ -4,17 +4,32 @@
   "title": "PAC VTT sheet template",
   "description": "The shape of a character sheet: sections of fields and card slots. Import it in a room from Templates.",
   "type": "object",
-  "required": ["name", "sections"],
+  "required": [
+    "name",
+    "sections"
+  ],
   "additionalProperties": false,
   "properties": {
-    "$schema": { "type": "string" },
-    "id": { "type": "string", "description": "Ignored on import; the room assigns its own id." },
-    "name": { "type": "string", "minLength": 1, "maxLength": 60, "description": "Shown in the template list, e.g. \"Raider\"." },
+    "$schema": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "description": "Ignored on import; the room assigns its own id."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "description": "Shown in the template list, e.g. \"Raider\"."
+    },
     "sections": {
       "type": "array",
       "minItems": 1,
       "maxItems": 20,
-      "items": { "$ref": "#/definitions/section" }
+      "items": {
+        "$ref": "#/definitions/section"
+      }
     }
   },
   "definitions": {
@@ -25,46 +40,160 @@
     },
     "section": {
       "type": "object",
-      "required": ["title"],
+      "required": [
+        "title"
+      ],
       "additionalProperties": false,
       "properties": {
-        "title": { "type": "string", "maxLength": 60 },
-        "fields": { "type": "array", "items": { "$ref": "#/definitions/field" } },
-        "slots": { "type": "array", "items": { "$ref": "#/definitions/slot" } }
+        "title": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/field"
+          }
+        },
+        "slots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/slot"
+          }
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 600,
+          "description": "Rules or instructions shown under the section title."
+        }
       }
     },
     "slot": {
       "type": "object",
-      "required": ["id", "label"],
+      "required": [
+        "id",
+        "label"
+      ],
       "additionalProperties": false,
       "description": "A place for cards on the sheet.",
       "properties": {
-        "id": { "$ref": "#/definitions/key" },
-        "label": { "type": "string", "minLength": 1, "maxLength": 40, "description": "E.g. Weapon, Armor, Gear." },
-        "count": { "type": "integer", "minimum": 1, "maximum": 20, "default": 1, "description": "How many slots with this label." }
+        "id": {
+          "$ref": "#/definitions/key"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "E.g. Weapon, Armor, Gear."
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 1,
+          "description": "How many slots with this label."
+        }
       }
     },
     "field": {
       "type": "object",
-      "required": ["id", "type"],
+      "required": [
+        "id",
+        "type"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "$ref": "#/definitions/key" },
-        "label": { "type": "string", "maxLength": 60 },
-        "type": {
-          "enum": ["number", "text", "longtext", "checkbox", "select", "track", "die"],
-          "description": "number: +/- buttons (and optional dice roll); text: one line; longtext: notes; checkbox: on/off; select: pick from options; track: a row of boxes (harm, stress); die: d4–d20 picker you can click to roll."
+        "id": {
+          "$ref": "#/definitions/key"
         },
-        "default": { "type": ["string", "number", "boolean"], "description": "Starting value, matching the type." },
-        "min": { "type": "number", "description": "number fields: lowest value." },
-        "max": { "type": "number", "description": "number fields: highest value." },
-        "roll": { "type": "string", "description": "number fields: dice rolled when the label is clicked, plus the value. \"2d6\" with a value of 2 rolls 2d6+2." },
-        "options": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 40 }, "minItems": 1, "maxItems": 30, "description": "select fields: the choices." },
-        "boxes": { "type": "integer", "minimum": 1, "maximum": 20, "description": "track fields: number of boxes." }
+        "label": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "hint": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Small help text shown under the field."
+        },
+        "type": {
+          "enum": [
+            "number",
+            "text",
+            "longtext",
+            "checkbox",
+            "select",
+            "track",
+            "die"
+          ],
+          "description": "number: +/- buttons (and optional dice roll); text: one line; longtext: notes; checkbox: on/off; select: pick from options; track: a row of boxes (harm, stress); die: d4\u2013d20 picker you can click to roll."
+        },
+        "default": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ],
+          "description": "Starting value, matching the type."
+        },
+        "min": {
+          "type": "number",
+          "description": "number fields: lowest value."
+        },
+        "max": {
+          "type": "number",
+          "description": "number fields: highest value."
+        },
+        "roll": {
+          "type": "string",
+          "description": "number fields: dice rolled when the label is clicked, plus the value. \"2d6\" with a value of 2 rolls 2d6+2."
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "minItems": 1,
+          "maxItems": 30,
+          "description": "select fields: the choices."
+        },
+        "boxes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "description": "track fields: number of boxes."
+        }
       },
       "allOf": [
-        { "if": { "properties": { "type": { "const": "select" } } }, "then": { "required": ["options"] } },
-        { "if": { "properties": { "type": { "const": "track" } } }, "then": { "required": ["boxes"] } }
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "select"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "options"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "track"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "boxes"
+            ]
+          }
+        }
       ]
     }
   }

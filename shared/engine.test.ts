@@ -387,3 +387,9 @@ test('maps can be placed; placement is validated and reverses', () => {
     assert.throws(() => apply(s, { kind: 'zone.map', id: 'board', map: { image: 'im1', scale: 1, ...bad } as never }), OpError, JSON.stringify(bad));
   }
 });
+
+test('templates accept field hints and section notes', () => {
+  const t: SheetTemplateFile = { name: 'Hints', sections: [{ title: 'Attributes', note: 'Range -1 to +3.', fields: [{ id: 'insight', label: 'Insight', hint: 'Awareness, smarts', type: 'number' }] }] };
+  assert.deepEqual(templateErrors(t), []);
+  assert.match(templateErrors({ ...t, sections: [{ ...t.sections[0], note: 'x'.repeat(601) }] }).join(), /note/);
+});

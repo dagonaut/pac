@@ -12,6 +12,8 @@ export interface FieldDef {
   /** Key for the value; unique within the template (lowercase letters, digits, _). */
   id: string;
   label?: string;
+  /** Small help text shown under the field, e.g. "Awareness, understanding, smarts". */
+  hint?: string;
   type: FieldType;
   /** Starting value: a number, text, true/false, an option, a box count or a die. */
   default?: string | number | boolean;
@@ -35,6 +37,8 @@ export interface SlotDef {
 
 export interface Section {
   title: string;
+  /** Rules or instructions shown under the section title. */
+  note?: string;
   fields?: FieldDef[];
   slots?: SlotDef[];
 }
@@ -70,7 +74,8 @@ export function templateErrors(t: unknown): string[] {
   tpl.sections.forEach((s, si) => {
     const where = `Section ${si + 1}`;
     if (!s || typeof s !== 'object') return void errs.push(`${where} must be an object.`);
-    const extra = Object.keys(s).filter((k) => !['title', 'fields', 'slots'].includes(k));
+    const extra = Object.keys(s).filter((k) => !['title', 'note', 'fields', 'slots'].includes(k));
+    if (s.note !== undefined && (typeof s.note !== 'string' || s.note.length > 600)) errs.push(`${where}: "note" must be text (up to 600 characters).`);
     if (extra.length) errs.push(`${where}: unknown key "${extra[0]}".`);
     if (typeof s.title !== 'string' || s.title.length > 60) errs.push(`${where}: "title" must be text (up to 60 characters).`);
     if (s.fields !== undefined && !Array.isArray(s.fields)) errs.push(`${where}: "fields" must be a list.`);
@@ -87,7 +92,8 @@ export function templateErrors(t: unknown): string[] {
       const w = `${where}, field ${fi + 1}${f && typeof f.label === 'string' ? ` (${f.label})` : ''}`;
       if (!f || typeof f !== 'object') { errs.push(`${w} must be an object.`); continue; }
       claim(f.id, w);
-      const extra = Object.keys(f).filter((k) => !['id', 'label', 'type', 'default', 'min', 'max', 'roll', 'options', 'boxes'].includes(k));
+      const extra = Object.keys(f).filter((k) => !['id', 'label', 'hint', 'type', 'default', 'min', 'max', 'roll', 'options', 'boxes'].includes(k));
+      if (f.hint !== undefined && (typeof f.hint !== 'string' || f.hint.length > 300)) errs.push(`${w}: "hint" must be text (up to 300 characters).`);
       if (extra.length) errs.push(`${w}: unknown key "${extra[0]}".`);
       if (!FIELD_TYPES.includes(f.type)) errs.push(`${w}: "type" must be one of ${FIELD_TYPES.join(', ')}.`);
       if (f.label !== undefined && (typeof f.label !== 'string' || f.label.length > 60)) errs.push(`${w}: "label" must be text (up to 60 characters).`);
@@ -167,9 +173,10 @@ export function normalizeTemplate(t: SheetTemplateFile, id: string): SheetTempla
     name: t.name.trim(),
     sections: t.sections.map((s) => ({
       title: s.title,
+      ...(s.note ? { note: s.note } : {}),
       ...(s.fields?.length ? { fields: s.fields.map((f) => {
         const keep: FieldDef = { id: f.id, type: f.type };
-        for (const k of ['label', 'default', 'min', 'max', 'roll', 'options', 'boxes'] as const) {
+        for (const k of ['label', 'hint', 'default', 'min', 'max', 'roll', 'options', 'boxes'] as const) {
           if (f[k] !== undefined) (keep as unknown as Record<string, unknown>)[k] = f[k];
         }
         return keep;

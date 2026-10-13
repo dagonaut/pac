@@ -1872,3 +1872,29 @@ input.wide {
 .preview-sheet {
   pointer-events: none;
 }
+
+/* Template help text */
+.sf-wrap {
+  display: grid;
+  gap: 1px;
+}
+
+.sf-hint {
+  color: var(--muted-text);
+  font-size: 0.75rem;
+  font-style: italic;
+  padding-left: 2px;
+  max-width: 22rem;
+}
+
+.sheet-note {
+  margin: 0 0 2px;
+  color: var(--muted-text);
+  font-size: 0.8rem;
+  max-width: 24rem;
+  white-space: pre-line;
+}
+
+input.section-note {
+  font-size: 0.85rem;
+}
