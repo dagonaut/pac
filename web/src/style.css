@@ -2180,3 +2180,220 @@ dialog.modal label.role {
 .tile.has-video .tile-portrait {
   display: none;
 }
+
+/* ---- Sound: header button and panel ---- */
+#sound-btn {
+  max-width: 260px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#sound-btn.playing {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+#sound-btn.active {
+  background: var(--panel-2);
+}
+
+.sound-unblock {
+  background: var(--accent);
+  color: #1b150e;
+  font-weight: 600;
+}
+
+.sound-panel {
+  position: fixed;
+  top: 56px;
+  right: 12px;
+  width: min(380px, calc(100vw - 24px));
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+  z-index: 950;
+  background: var(--panel);
+  border: 1px solid #4a3f31;
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px #000a;
+  padding: 10px 14px 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.sound-panel[hidden] {
+  display: none;
+}
+
+.sound-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sound-panel h3,
+.sound-panel h4,
+.sound-panel h5 {
+  margin: 0 0 6px;
+}
+
+.sound-panel h4 {
+  color: var(--accent);
+  font-size: 0.95rem;
+}
+
+.sound-panel h5 {
+  margin-top: 8px;
+  color: var(--muted-text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sound-panel section {
+  display: grid;
+  gap: 6px;
+}
+
+.sound-panel p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.sound-panel .now {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.sound-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-2);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.sound-progress-bar {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+}
+
+.transport {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.transport button {
+  min-width: 2.2rem;
+}
+
+.transport .play {
+  background: var(--accent);
+  color: #1b150e;
+}
+
+.transport label.check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.sound-slider {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--muted-text);
+}
+
+.playlist {
+  margin: 0;
+  padding-left: 1.4rem;
+  display: grid;
+  gap: 2px;
+  font-size: 0.9rem;
+}
+
+ul.playlist {
+  list-style: none;
+  padding-left: 0;
+}
+
+.playlist li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.playlist li.current .track {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.playlist .track {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+button.track {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--text);
+}
+
+.sound-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.sound-actions button {
+  padding: 0 6px;
+  font-size: 0.8rem;
+}
+
+.sfx-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
+}
+
+.sfx {
+  display: grid;
+  gap: 2px;
+}
+
+.sfx-play {
+  padding: 10px 6px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sfx-play:active {
+  background: var(--accent);
+  color: #1b150e;
+}
+
+.sfx .sound-actions {
+  justify-content: center;
+  opacity: 0.7;
+}
+
+.sfx-buttons {
+  display: flex;
+  gap: 6px;
+}

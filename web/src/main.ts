@@ -11,6 +11,7 @@ import { createImporter, uploadImage } from './importer';
 import { createTemplates } from './templates';
 import { addEntry, clearLog, note, resetLog, setNameColors } from './log';
 import { face, openPlayers, openProfile } from './players';
+import { createSound } from './sound';
 import { cameraError, getPermissions, micError, pick, probeCamera } from './media';
 import { setupOps, systemName, systems } from './systems/index';
 
@@ -436,6 +437,15 @@ async function act(op: Parameters<GameClient['send']>[0]): Promise<boolean> {
   }
 }
 
+const sound = createSound($('#room-view header'), {
+  me: () => me,
+  state: () => game?.state ?? null,
+  act,
+  note,
+  token: () => token,
+  serverNow: () => game?.serverNow() ?? Date.now(),
+});
+
 const templates = createTemplates({ state: () => game?.state ?? null, act });
 
 const board = createBoard($('#board'), {
@@ -573,6 +583,7 @@ $('#copy-link').addEventListener('click', async (e) => {
 // ---- Enter / leave --------------------------------------------------------------------------
 
 function leftRoom(reason: string) {
+  sound.stop();
   session = null;
   game?.close();
   game = null;
@@ -609,11 +620,14 @@ async function enterRoom(id: string, button: HTMLButtonElement) {
       snapshot: (state, log) => {
         renderState(state);
         board.render(state);
+        sound.render(state);
         resetLog(log, state, me);
       },
       op: (entry, state) => {
         renderState(state);
         board.render(state);
+        sound.render(state);
+        sound.onOp(entry.op);
         addEntry(entry, state, me);
         countUnread(entry.op.kind, entry.by);
         showRoll(entry.by, entry.op);

@@ -99,6 +99,34 @@ export interface Stroke {
   text?: string;
 }
 
+/** An audio file in the room's sound library. */
+export interface SoundDef {
+  id: string;
+  name: string;
+  /** /assets/<room>/<uuid>.<mp3|ogg|m4a|wav|webm|aac> */
+  src: string;
+  /** Music goes in the playlist; sfx are one-shots on the soundboard. */
+  kind: 'music' | 'sfx';
+  by: string;
+}
+
+export type MusicLoop = 'all' | 'one' | 'off';
+
+/** What the room's music is doing. Every browser plays the file itself, in sync: while playing,
+ *  the track started at server time `startedAt` (ms); while paused, it sits at `position` (s). */
+export interface MusicState {
+  playlist: string[];
+  index: number;
+  playing: boolean;
+  startedAt: number;
+  position: number;
+  /** Playlist repeat (all), track repeat (one), or stop at the end (off). */
+  loop: MusicLoop;
+  shuffle: boolean;
+  /** GM's master volume, 0..1 (for fades); each listener also has their own. */
+  volume: number;
+}
+
 export interface RoomState {
   id: string;
   name: string;
@@ -120,6 +148,9 @@ export interface RoomState {
   templates?: Record<string, SheetTemplate>;
   /** Counter name -> color, shared by every piece in the room (so "poison" always looks the same). */
   counterColors?: Record<string, string>;
+  /** Sound library (music and effects). Optional for older rooms. */
+  sounds?: Record<string, SoundDef>;
+  music?: MusicState;
 }
 
 export interface DiceTerm {
@@ -170,6 +201,15 @@ export type Op =
   | { kind: 'stroke.delete'; id: string }
   /** Move a drawing (new points) or change a text label's words. */
   | { kind: 'stroke.update'; id: string; set: { points?: number[]; text?: string } }
+  | { kind: 'sound.create'; sound: SoundDef }
+  | { kind: 'sound.update'; id: string; set: { name?: string; kind?: 'music' | 'sfx' } }
+  /** Also drops it from the playlist. */
+  | { kind: 'sound.delete'; id: string }
+  /** Change the music. The server stamps `at` (its clock, ms) so everyone agrees when a track
+   *  started; `position` (s) seeks, and changing `index` starts that track from the top. */
+  | { kind: 'music'; set: { playlist?: string[]; index?: number; playing?: boolean; position?: number; loop?: MusicLoop; shuffle?: boolean; volume?: number }; at?: number }
+  /** Play a sound effect once on everyone's speakers (`sound: null` stops all effects). */
+  | { kind: 'sfx'; sound: string | null }
   | { kind: 'batch'; ops: Op[] }
   /** Client sends `{kind:'undo'}`; the server fills in which entry and the op that reverses it. */
   | { kind: 'undo'; target?: number; op?: Op };

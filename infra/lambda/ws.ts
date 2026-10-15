@@ -231,12 +231,12 @@ export async function handler(event: WsEvent): Promise<APIGatewayProxyResultV2> 
 
   switch (msg.type) {
     case 'ping':
-      await send(event, connectionId, { type: 'pong' });
+      await send(event, connectionId, { type: 'pong', now: Date.now() });
       break;
 
     case 'hello': {
       const [state, log] = await Promise.all([loadState(room), recentLog(room, LOG_IN_SNAPSHOT)]);
-      if (state) await send(event, connectionId, { type: 'snapshot', state, log: log.map(toEntry).reverse() });
+      if (state) await send(event, connectionId, { type: 'snapshot', state, log: log.map(toEntry).reverse(), now: Date.now() });
       break;
     }
 

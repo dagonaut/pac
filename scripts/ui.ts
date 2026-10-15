@@ -6,7 +6,7 @@
 // ("zz…" ids, written to the Game table and removed at the end); the room "zz-ui-<time>" is
 // archived at the end.
 import assert from 'node:assert/strict';
-import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { chromium, type Page } from 'playwright';
 import { makeTestPlayers } from './test-players.ts';
@@ -22,6 +22,21 @@ const browser = await chromium.launch({
   args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'],
 });
 const shot = (p: Page, name: string) => p.screenshot({ path: path.join(shots, `${name}.png`) });
+
+/** A mono 16-bit WAV of a sine tone, for the music and sound-effect tests. */
+function tone(file: string, seconds: number, hz: number) {
+  const rate = 8000;
+  const n = Math.round(seconds * rate);
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8);
+  buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22); buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
+  buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * hz * i) / rate) * 8000), 44 + i * 2);
+  const out = path.join(shots, file);
+  writeFileSync(out, buf);
+  return out;
+}
 
 const ANA_COLOR = '#3fa7d6';
 const testPlayers = await makeTestPlayers([
@@ -53,7 +68,8 @@ try {
   // Ana is an admin: the Players dialog lists both players with their links.
   await ana.click('#players-btn');
   await ana.waitForSelector('dialog.players-dialog .player-list li:has-text("Bo")');
-  assert.equal(await ana.locator('dialog.players-dialog button:text-is("Copy link")').count(), 2);
+  // (Real players are listed too; only look at the test ones.)
+  for (const n of ['Ana', 'Bo']) assert.equal(await ana.locator(`dialog.players-dialog li:has(strong:text-is("${n}")) button:text-is("Copy link")`).count(), 1, n);
   await shot(ana, '00a-players-dialog');
   await ana.click('dialog.players-dialog button:text-is("Close")');
   // Profile: the color shows on her face in the lobby.
@@ -472,6 +488,53 @@ try {
   await shot(ana, '10a-cards-bar-closed');
   await ana.click('.bar-handle');
   await ana.waitForSelector('.zone[data-zone=loot]', { state: 'visible' });
+
+  // ---- Sound: the GM uploads music, plays it, everyone hears it in sync; effects layer on top ----
+  await bo.click('#sound-btn');
+  await bo.waitForSelector('.sound-panel:not([hidden]) >> text=The GM runs the music');
+  assert.equal(await bo.locator('.sound-panel .transport').count(), 0, 'no music controls for players');
+  await bo.click('#sound-btn');
+  await ana.click('#gm-btn');
+  await untilLog(bo, 'took the GM seat');
+  await ana.click('#sound-btn');
+  const short = tone('Short Theme.wav', 3, 330);
+  const long = tone('Long Theme.wav', 40, 440);
+  const [musicChooser] = await Promise.all([ana.waitForEvent('filechooser'), ana.click('.sound-panel button:text-is("Upload music…")')]);
+  await musicChooser.setFiles([short, long]);
+  await ana.waitForFunction(() => document.querySelectorAll('.sound-panel ol.playlist li').length === 2, null, { timeout: 30000 });
+  await ana.click('.sound-panel .transport .play');
+  // Bo's browser plays the first track, then moves on to the second when the GM's browser does.
+  const playingSrc = (p: Page) => p.evaluate(() => {
+    const a = document.querySelector('#music-audio') as HTMLAudioElement;
+    return a.paused ? '' : decodeURIComponent(a.currentSrc);
+  });
+  await bo.waitForFunction(() => !(document.querySelector('#music-audio') as HTMLAudioElement).paused, null, { timeout: 10000 });
+  const firstSrc = await playingSrc(bo);
+  await bo.waitForFunction((src) => {
+    const a = document.querySelector('#music-audio') as HTMLAudioElement;
+    return !a.paused && a.currentSrc !== src && a.currentTime > 1;
+  }, firstSrc, { timeout: 15000 });
+  assert.match(await bo.locator('.now-playing').innerText(), /Long Theme/);
+  // In sync: both are within a second and a half of each other.
+  const [ta, tb] = await Promise.all([ana, bo].map((p) => p.evaluate(() => (document.querySelector('#music-audio') as HTMLAudioElement).currentTime)));
+  assert.ok(Math.abs(ta - tb) < 1.5, `music in sync (Ana ${ta.toFixed(2)}s, Bo ${tb.toFixed(2)}s)`);
+  // Effects: upload one, play it, and Bo hears it while the music keeps going.
+  const boom = tone('Boom.wav', 1.5, 110);
+  const [sfxChooser] = await Promise.all([ana.waitForEvent('filechooser'), ana.click('.sound-panel button:text-is("Upload effects…")')]);
+  await sfxChooser.setFiles([boom]);
+  await ana.click('.sound-panel .sfx-play:text-is("Boom")');
+  await bo.waitForSelector('#sfx-audio audio', { state: 'attached' });
+  assert.notEqual(await playingSrc(bo), '', 'music still playing under the effect');
+  await untilLog(bo, 'played Boom');
+  await shot(ana, '11a-sound-gm');
+  await bo.click('#sound-btn');
+  await shot(bo, '11b-sound-player');
+  await bo.click('#sound-btn');
+  // Pause stops everyone.
+  await ana.click('.sound-panel .transport .play');
+  await bo.waitForFunction(() => (document.querySelector('#music-audio') as HTMLAudioElement).paused);
+  await ana.click('#sound-btn');
+  await ana.click('#gm-btn'); // leave the seat
 
   // Chat & dice panel: hide it, get an unread count, show it again.
   await bo.click('#side-tab');

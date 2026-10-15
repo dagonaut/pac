@@ -44,6 +44,12 @@ const IMAGE_TYPES: Record<string, string> = {
   'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/avif': 'avif',
 };
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+// Music and sound effects (room uploads only).
+const AUDIO_TYPES: Record<string, string> = {
+  'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/ogg': 'ogg', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/m4a': 'm4a',
+  'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/webm': 'webm', 'audio/aac': 'aac',
+};
+const MAX_AUDIO_BYTES = 50 * 1024 * 1024;
 const MAX_FILES = 200;
 
 // Same shape as AuthError, so both turn into an HTTP status the same way.
@@ -226,14 +232,16 @@ async function uploadUrls(body: Record<string, unknown>) {
   const uploads = await Promise.all(
     files.map(async (f: { name?: unknown; type?: unknown; size?: unknown }) => {
       const type = String(f.type ?? '');
-      const ext = IMAGE_TYPES[type];
-      if (!ext) throw new HttpError(400, `"${String(f.name)}" isn't a PNG, JPEG, WebP, GIF or AVIF image.`);
-      if (Number(f.size) > MAX_IMAGE_BYTES) throw new HttpError(400, `"${String(f.name)}" is over 8 MB.`);
+      const audio = body.purpose === 'portrait' ? undefined : AUDIO_TYPES[type]; // portraits are images only
+      const ext = IMAGE_TYPES[type] ?? audio;
+      if (!ext) throw new HttpError(400, `"${String(f.name)}" isn't a PNG, JPEG, WebP, GIF or AVIF image${body.purpose === 'portrait' ? '' : ', or MP3, OGG, M4A, WAV, WebM or AAC audio'}.`);
+      const limit = audio ? MAX_AUDIO_BYTES : MAX_IMAGE_BYTES;
+      if (Number(f.size) > limit) throw new HttpError(400, `"${String(f.name)}" is over ${limit / 1024 / 1024} MB.`);
       const key = `assets/${folder}/${randomUUID()}.${ext}`;
       const { url, fields } = await createPresignedPost(s3, {
         Bucket: ASSETS_BUCKET,
         Key: key,
-        Conditions: [['content-length-range', 1, MAX_IMAGE_BYTES], ['eq', '$Content-Type', type]],
+        Conditions: [['content-length-range', 1, limit], ['eq', '$Content-Type', type]],
         Fields: { 'Content-Type': type, 'Cache-Control': 'public, max-age=31536000, immutable' },
         Expires: 600,
       });

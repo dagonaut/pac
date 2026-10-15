@@ -19,6 +19,10 @@ const PING_MS = 5 * 60_000; // API Gateway drops idle sockets after 10 minutes
 
 export class GameClient {
   state: RoomState | null = null;
+  /** Server clock minus ours (ms), from the quickest ping round trip so far. */
+  clockOffset = 0;
+  private bestRtt = Infinity;
+  private pingSent = 0;
   private ws: WebSocket | null = null;
   private closed = false;
   private retry = 0;
@@ -49,6 +53,16 @@ export class GameClient {
     this.ws?.close();
   }
 
+  /** Server time now, by our clock plus the measured offset. */
+  serverNow() {
+    return Date.now() + this.clockOffset;
+  }
+
+  private sendPing() {
+    this.pingSent = Date.now();
+    this.post({ type: 'ping' });
+  }
+
   private post(msg: ClientMessage) {
     this.ws?.send(JSON.stringify(msg));
   }
@@ -59,7 +73,9 @@ export class GameClient {
     ws.onopen = () => {
       this.retry = 0;
       this.post({ type: 'hello' });
-      this.ping = setInterval(() => this.post({ type: 'ping' }), PING_MS);
+      // A few quick pings to learn the server's clock (for music sync), then keepalives.
+      [300, 1500, 4000].forEach((ms) => setTimeout(() => this.sendPing(), ms));
+      this.ping = setInterval(() => this.sendPing(), PING_MS);
     };
     ws.onmessage = (e) => this.receive(JSON.parse(e.data) as ServerMessage);
     ws.onclose = () => {
@@ -91,12 +107,22 @@ export class GameClient {
         break;
       }
       case 'snapshot': {
+        // A rough clock until the first pong comes back.
+        if (msg.now && this.bestRtt === Infinity) this.clockOffset = msg.now - Date.now();
         this.state = msg.state;
         this.events.status(true);
         this.events.snapshot(msg.state, msg.log);
         const later = this.buffered.filter((e) => e.seq > msg.state.seq);
         this.buffered = [];
         later.forEach((e) => this.applyEntry(e));
+        break;
+      }
+      case 'pong': {
+        const rtt = Date.now() - this.pingSent;
+        if (msg.now && this.pingSent && rtt <= this.bestRtt) {
+          this.bestRtt = rtt;
+          this.clockOffset = msg.now + rtt / 2 - Date.now();
+        }
         break;
       }
       case 'op':

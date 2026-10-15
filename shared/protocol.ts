@@ -9,12 +9,13 @@ export type ClientMessage =
 
 export type ServerMessage =
   /** Full state plus recent log, for joining or catching up after a reconnect. */
-  | { type: 'snapshot'; state: RoomState; log: LogEntry[] }
+  | { type: 'snapshot'; state: RoomState; log: LogEntry[]; now?: number }
   /** An applied op, broadcast to everyone in the room (including the sender). */
   | { type: 'op'; entry: LogEntry }
   /** Only to the sender, when its op was rejected. */
   | { type: 'error'; cid?: string; message: string }
-  | { type: 'pong' }
+  /** `now`: the server's clock (ms), so browsers can play music in sync. */
+  | { type: 'pong'; now?: number }
   /** Piece `i` of `n` of a message too big for one WebSocket frame (API Gateway caps them at 128 KB).
    *  Join the `data` strings in order and parse the result as a ServerMessage. */
   | { type: 'chunk'; id: string; i: number; n: number; data: string };

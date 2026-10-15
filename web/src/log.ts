@@ -90,6 +90,23 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
       return what ? `drew ${what} on the table` : 'drew on the table';
     }
     case 'stroke.delete': return 'erased a drawing';
+    case 'sound.create': return `added the ${op.sound.kind === 'music' ? 'track' : 'sound effect'} ${op.sound.name}`;
+    case 'sound.update': return op.set.name ? `renamed a sound to ${op.set.name}` : `made ${state.sounds?.[op.id]?.name ?? 'a sound'} ${op.set.kind === 'music' ? 'music' : 'a sound effect'}`;
+    case 'sound.delete': return 'deleted a sound';
+    case 'music': {
+      const s = op.set;
+      const track = state.music && state.sounds?.[state.music.playlist[state.music.index]]?.name;
+      if (s.index !== undefined && state.music?.playing) return `is playing ${track ?? 'music'}`;
+      if (s.playing === true) return `started the music${track ? `: ${track}` : ''}`;
+      if (s.playing === false) return s.position === 0 ? 'stopped the music' : 'paused the music';
+      if (s.playlist) return 'changed the playlist';
+      if (s.position !== undefined) return 'skipped ahead in the music';
+      if (s.loop) return { all: 'set the music to repeat the playlist', one: 'set the music to repeat the track', off: 'turned off music repeat' }[s.loop];
+      if (s.shuffle !== undefined) return s.shuffle ? 'turned on shuffle' : 'turned off shuffle';
+      if (s.volume !== undefined) return `set the music volume to ${Math.round(s.volume * 100)}%`;
+      return 'changed the music';
+    }
+    case 'sfx': return op.sound ? `played ${state.sounds?.[op.sound]?.name ?? 'a sound effect'}` : 'stopped the sound effects';
     case 'stroke.update': return op.set.text !== undefined ? `changed text to "${firstLine(op.set.text)}"` : 'moved a drawing';
     case 'batch': {
       if (op.ops.length && op.ops.every((o) => o.kind === 'stroke.delete')) return `cleared ${op.ops.length} drawing${op.ops.length === 1 ? '' : 's'}`;
@@ -104,7 +121,15 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
       if (fromImage && fromImage.kind === 'card.create') return `put ${fromImage.card.name} on the table`;
       const imported = op.ops.filter((o) => o.kind === 'card.create').length;
       if (imported) return `imported ${imported} card${imported === 1 ? '' : 's'}`;
-      return `moved ${op.ops.length} cards`;
+      const sounds = op.ops.filter((o) => o.kind === 'sound.create');
+      if (sounds.length) {
+        const music = sounds.every((o) => o.kind === 'sound.create' && o.sound.kind === 'music');
+        return `uploaded ${sounds.length} ${music ? `track${sounds.length === 1 ? '' : 's'}` : `sound effect${sounds.length === 1 ? '' : 's'}`}`;
+      }
+      if (op.ops[0]?.kind === 'zone.map') return 're-centered the map (and what was on it)';
+      const moves = op.ops.filter((o) => o.kind === 'piece.update').length;
+      if (moves === op.ops.length) return `moved ${moves} card${moves === 1 ? '' : 's'}`;
+      return `made ${op.ops.length} changes`;
     }
     case 'undo': return 'undid their last action';
     default: return op.kind;
@@ -119,6 +144,8 @@ export function setNameColors(colors: Map<string, string>) {
 }
 
 export function addEntry(entry: LogEntry, state: RoomState, me: string) {
+  // A GM fading the music sends a stream of volume changes; they'd bury the log.
+  if (entry.op.kind === 'music' && Object.keys(entry.op.set).every((k) => k === 'volume')) return;
   const li = document.createElement('li');
   li.title = new Date(entry.ts).toLocaleString();
   const who = document.createElement('b');

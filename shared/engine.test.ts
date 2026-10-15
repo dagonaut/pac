@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { describeRoll, roll } from './dice.ts';
-import { apply, forbidden, newPiece, OpError, publicNames, resolve } from './engine.ts';
+import { apply, forbidden, musicPosition, newPiece, OpError, publicNames, resolve } from './engine.ts';
 import { emptyRoom, type Op, type RoomState } from './model.ts';
 import { defaultValues, type SheetTemplateFile, slotLabels, templateErrors } from './sheet.ts';
 
@@ -89,6 +89,46 @@ test('GM seat and GM-only ops', () => {
   assert.equal(forbidden(s, { kind: 'gm', seat: null }, 'Sam', false), null);
   assert.equal(forbidden(s, { kind: 'gm', seat: null }, 'Paul', true), null);
   assert.match(forbidden(s, { kind: 'gm', seat: null }, 'Bo', false)!, /leave/);
+});
+
+test('music: play, pause, seek, next track, all in server time', () => {
+  const s = room();
+  const snd = (id: string, kind: 'music' | 'sfx' = 'music') =>
+    apply(s, { kind: 'sound.create', sound: { id, name: id, src: `/assets/r/${id}.mp3`, kind, by: 'Sam' } });
+  snd('a'); snd('b'); snd('boom', 'sfx');
+  assert.throws(() => apply(s, { kind: 'sound.create', sound: { id: 'x', name: 'x', src: 'https://evil/x.mp3', kind: 'music', by: 'Sam' } }), OpError);
+  const music = (set: Extract<Op, { kind: 'music' }>['set'], at: number) => apply(s, resolve(s, { kind: 'music', set }, { rand: fixed(1), now: () => at }));
+
+  music({ playlist: ['a', 'b'], playing: true }, 10_000);
+  assert.deepEqual([s.music!.index, s.music!.playing, s.music!.startedAt], [0, true, 10_000]);
+  assert.equal(musicPosition(s.music!, 25_000), 15);
+  music({ playing: false }, 25_000); // pause keeps the spot
+  assert.equal(s.music!.position, 15);
+  music({ playing: true }, 40_000); // resume from it
+  assert.equal(musicPosition(s.music!, 41_000), 16);
+  music({ position: 100 }, 50_000); // seek
+  assert.equal(musicPosition(s.music!, 50_000), 100);
+  music({ index: 1 }, 60_000); // a new track starts from the top
+  assert.deepEqual([s.music!.index, musicPosition(s.music!, 61_000)], [1, 1]);
+  music({ playlist: ['b'] }, 62_000); // reordering keeps the current track
+  assert.equal(s.music!.playlist[s.music!.index], 'b');
+  assert.throws(() => music({ index: 5 }, 63_000), OpError);
+  assert.throws(() => music({ playlist: ['nope'] }, 63_000), OpError);
+
+  // Deleting the playing track stops the music; sfx needs a real sound.
+  apply(s, { kind: 'sound.delete', id: 'b' });
+  assert.deepEqual([s.music!.playlist, s.music!.playing], [[], false]);
+  assert.equal(apply(s, { kind: 'sfx', sound: 'boom' }), null);
+  assert.throws(() => apply(s, { kind: 'sfx', sound: 'b' }), OpError);
+});
+
+test('sound is strictly the GM seat\'s', () => {
+  const s = room();
+  const play: Op = { kind: 'sfx', sound: null };
+  assert.match(forbidden(s, play, 'Bo', false)!, /Take the GM seat/);
+  s.gm = 'Sam';
+  assert.match(forbidden(s, { kind: 'batch', ops: [play] }, 'Bo', false)!, /controls sound/);
+  assert.equal(forbidden(s, play, 'Sam', true), null);
 });
 
 test('publicNames only names face-up, unhidden cards', () => {

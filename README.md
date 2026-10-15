@@ -11,6 +11,7 @@ Prototype, usable at the table:
 - **Images**: a pull-out drawer of maps and handouts per room. Upload in bulk, optionally hidden until shown. Set one as the table's background map (centered with free table around it; right-click it to size or re-center it), show one big on everyone's screen (spotlight), or put it on the table as a movable piece.
 - **Table**: pan/zoom, optional grid, resizable pieces that can be locked in place and brought to the front or sent to the back, **live drawing** (freehand, lines, arrows, boxes, circles, text labels), and pings.
 - **Dice**: expressions like `2d6+3`, rolled on the server. Chat, a log of every action, and undo.
+- **Music and sound effects** (GM only): upload tracks into a playlist (repeat, shuffle, room volume for fades) that every browser plays in sync, plus a soundboard of one-shot effects layered on top. Everyone sets their own volume.
 
 ## Layout
 

@@ -2,7 +2,7 @@
 // copy, then broadcasts the resolved op; every browser runs the same apply(), so all copies of the
 // state stay identical. apply() returns the op that reverses it (for undo), or null.
 import { roll } from './dice.ts';
-import type { CardDef, Op, Piece, PieceProps, RoomState, StrokeShape, Visibility, Zone, ZoneKind } from './model.ts';
+import type { CardDef, MusicLoop, MusicState, Op, Piece, PieceProps, RoomState, StrokeShape, Visibility, Zone, ZoneKind } from './model.ts';
 import { normalizeTemplate, type SheetTemplate, templateErrors } from './sheet.ts';
 
 const ZONE_KINDS: ZoneKind[] = ['deck', 'row', 'board', 'slots', 'discard', 'hand'];
@@ -17,6 +17,8 @@ const MAX_CARDS = 2000;
 const MAX_PIECES = 3000;
 const MAX_IMAGES = 500;
 const MAX_TEMPLATES = 50;
+const MAX_SOUNDS = 300;
+const MAX_PLAYLIST = 200;
 
 export class OpError extends Error {}
 
@@ -38,6 +40,21 @@ function own<T>(rec: Record<string, T> | undefined, id: unknown): T | undefined 
 /** Card art must be an image uploaded to this room (no outside URLs that could track players). */
 const isArt = (v: unknown, state: RoomState) =>
   typeof v === 'string' && v.length <= 300 && v.startsWith(`/assets/${state.id}/`) && /^\/assets\/[a-z0-9-]+\/[\w-]+\.(png|jpg|webp|gif|avif)$/.test(v);
+
+/** Audio must be uploaded to this room too. */
+const isAudio = (v: unknown, state: RoomState) =>
+  typeof v === 'string' && v.length <= 300 && v.startsWith(`/assets/${state.id}/`) && /^\/assets\/[a-z0-9-]+\/[\w-]+\.(mp3|ogg|m4a|wav|webm|aac)$/.test(v);
+
+const MUSIC_LOOPS: MusicLoop[] = ['all', 'one', 'off'];
+
+export function emptyMusic(): MusicState {
+  return { playlist: [], index: 0, playing: false, startedAt: 0, position: 0, loop: 'all', shuffle: false, volume: 1 };
+}
+
+/** Where the music is (seconds into the current track) at server time `now`. */
+export function musicPosition(m: MusicState, now: number): number {
+  return m.playing ? Math.max(0, (now - m.startedAt) / 1000) : m.position;
+}
 
 const STROKE_SHAPES: StrokeShape[] = ['path', 'line', 'arrow', 'rect', 'ellipse', 'text'];
 
@@ -155,9 +172,11 @@ function nextIndex(state: RoomState, zone: string): number {
 export function resolve(
   state: RoomState,
   op: Op,
-  ctx: { rand: (sides: number) => number; undo?: (state: RoomState) => { target: number; op: Op } },
+  ctx: { rand: (sides: number) => number; undo?: (state: RoomState) => { target: number; op: Op }; now?: () => number },
 ): Op {
   switch (op.kind) {
+    case 'music':
+      return { ...op, at: (ctx.now ?? Date.now)() };
     case 'roll':
       if (!isText(op.expr, 60)) fail('Roll expression is too long.');
       try {
@@ -502,6 +521,91 @@ export function apply(state: RoomState, op: Op): Op | null {
       return { kind: 'stroke.add', stroke: k };
     }
 
+    case 'sound.create': {
+      const snd = op.sound;
+      const sounds = (state.sounds ??= {});
+      if (!snd || typeof snd !== 'object' || !isId(snd.id) || own(sounds, snd.id)) fail('Bad or duplicate sound.');
+      const extra = Object.keys(snd).find((k) => !['id', 'name', 'src', 'kind', 'by'].includes(k));
+      if (extra) fail(`Unknown sound field ${extra}.`);
+      if (!isKey(snd.name, 120)) fail('Sound names are 1–120 characters.');
+      if (!isAudio(snd.src, state)) fail('Sounds must be audio uploaded to this room.');
+      if (snd.kind !== 'music' && snd.kind !== 'sfx') fail('A sound is music or an effect.');
+      if (!isText(snd.by, 40)) fail('Bad sound.');
+      if (Object.keys(sounds).length >= MAX_SOUNDS) fail(`A room holds at most ${MAX_SOUNDS} sounds.`);
+      sounds[snd.id] = { id: snd.id, name: snd.name, src: snd.src, kind: snd.kind, by: snd.by };
+      return { kind: 'sound.delete', id: snd.id };
+    }
+
+    case 'sound.update': {
+      const snd = own(state.sounds, op.id) ?? fail('No such sound.');
+      if (!op.set || typeof op.set !== 'object') fail('Nothing to update.');
+      const keys = Object.keys(op.set);
+      if (!keys.length || keys.some((k) => k !== 'name' && k !== 'kind')) fail('Only a sound\'s name and kind can change.');
+      if (op.set.name !== undefined && !isKey(op.set.name, 120)) fail('Sound names are 1–120 characters.');
+      if (op.set.kind !== undefined && op.set.kind !== 'music' && op.set.kind !== 'sfx') fail('A sound is music or an effect.');
+      const prev = Object.fromEntries(keys.map((k) => [k, snd[k as 'name' | 'kind']]));
+      Object.assign(snd, op.set);
+      return { kind: 'sound.update', id: op.id, set: prev };
+    }
+
+    case 'sound.delete': {
+      const snd = own(state.sounds, op.id) ?? fail('No such sound.');
+      delete state.sounds![op.id];
+      const m = state.music;
+      if (m?.playlist.includes(op.id)) {
+        const current = m.playlist[m.index];
+        m.playlist = m.playlist.filter((id) => id !== op.id);
+        // Keep the current track if it's still there; if it was the one deleted, stop.
+        if (current === op.id) Object.assign(m, { index: 0, playing: false, position: 0 });
+        else m.index = Math.max(0, m.playlist.indexOf(current));
+      }
+      return { kind: 'sound.create', sound: snd };
+    }
+
+    case 'music': {
+      if (!isNum(op.at)) fail('Music change has no time.');
+      const set = op.set;
+      if (!set || typeof set !== 'object') fail('Nothing to change.');
+      const keys = Object.keys(set);
+      if (!keys.length || keys.some((k) => !['playlist', 'index', 'playing', 'position', 'loop', 'shuffle', 'volume'].includes(k))) fail('Bad music change.');
+      const prev = state.music ?? emptyMusic();
+      const m: MusicState = { ...prev, playlist: [...prev.playlist] };
+      if (set.playlist !== undefined) {
+        if (!Array.isArray(set.playlist) || set.playlist.length > MAX_PLAYLIST) fail(`A playlist holds at most ${MAX_PLAYLIST} tracks.`);
+        if (!set.playlist.every((id) => own(state.sounds, id))) fail('That track is not in the sound library.');
+        m.playlist = [...set.playlist];
+        // Keep playing the same track if it's still in the list.
+        const at = m.playlist.indexOf(prev.playlist[prev.index]);
+        m.index = at >= 0 ? at : 0;
+      }
+      if (set.index !== undefined && !(Number.isInteger(set.index) && set.index >= 0 && set.index < Math.max(1, m.playlist.length))) fail('No such track.');
+      if (set.position !== undefined && !(isNum(set.position) && set.position >= 0 && set.position <= 86400)) fail('Bad music position.');
+      if (set.playing !== undefined && typeof set.playing !== 'boolean') fail('Bad music state.');
+      if (set.loop !== undefined && !MUSIC_LOOPS.includes(set.loop)) fail('Bad repeat mode.');
+      if (set.shuffle !== undefined && typeof set.shuffle !== 'boolean') fail('Bad shuffle.');
+      if (set.volume !== undefined && !(isNum(set.volume) && set.volume >= 0 && set.volume <= 1)) fail('Volume is 0–1.');
+      const trackChanged = (set.index !== undefined && set.index !== m.index) || m.playlist[m.index] !== prev.playlist[prev.index];
+      if (set.index !== undefined) m.index = set.index;
+      if (set.loop !== undefined) m.loop = set.loop;
+      if (set.shuffle !== undefined) m.shuffle = set.shuffle;
+      if (set.volume !== undefined) m.volume = set.volume;
+      const pos = set.position ?? (trackChanged ? 0 : musicPosition(prev, op.at));
+      m.playing = (set.playing ?? prev.playing) && m.playlist.length > 0;
+      if (m.playing) {
+        m.startedAt = Math.round(op.at - pos * 1000);
+        m.position = 0;
+      } else {
+        m.startedAt = 0;
+        m.position = Math.round(pos * 1000) / 1000;
+      }
+      state.music = m;
+      return null; // music isn't undone (rewinding time doesn't make sense)
+    }
+
+    case 'sfx':
+      if (op.sound !== null && !own(state.sounds, op.sound)) fail('No such sound.');
+      return null;
+
     case 'batch': {
       if (!Array.isArray(op.ops) || op.ops.length > MAX_BATCH) fail(`A batch holds at most ${MAX_BATCH} ops.`);
       const undo: Op[] = [];
@@ -534,6 +638,12 @@ export function gmOnly(op: Op): boolean {
   }
 }
 
+/** Sound and music: strictly the GM seat's (even when nobody holds it). */
+function audioOp(op: Op): boolean {
+  if (op.kind === 'batch') return Array.isArray(op.ops) && op.ops.some(audioOp);
+  return op.kind === 'music' || op.kind === 'sfx' || op.kind.startsWith('sound.');
+}
+
 /** Why `name` may not send `op` in this room, or null if they may. `canGm`: they're a player
  *  flagged GM (guests and other players can't take the seat). */
 export function forbidden(state: RoomState, op: Op, name: string, canGm: boolean): string | null {
@@ -544,6 +654,7 @@ export function forbidden(state: RoomState, op: Op, name: string, canGm: boolean
     if (op.seat !== name) return 'You can only take the GM seat for yourself.';
     return canGm ? null : 'Only players marked GM can take the GM seat. (Ask an admin.)';
   }
+  if (state.gm !== name && audioOp(op)) return state.gm ? `Only the GM (${state.gm}) controls sound.` : 'Only the GM controls sound. Take the GM seat first.';
   if (state.gm && state.gm !== name && gmOnly(op)) return `Only the GM (${state.gm}) can do that.`;
   return null;
 }
