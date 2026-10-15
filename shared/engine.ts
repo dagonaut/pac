@@ -91,7 +91,7 @@ function checkMap(m: unknown, state: RoomState) {
 
 /** Is an image in use (as a map or the spotlight)? Those can't be deleted. */
 function imageInUse(state: RoomState, id: string) {
-  return state.spotlight?.image === id || Object.values(state.zones).some((z) => z.map?.image === id);
+  return state.spotlight?.image === id || state.lobby?.image === id || Object.values(state.zones).some((z) => z.map?.image === id);
 }
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
@@ -422,7 +422,7 @@ export function apply(state: RoomState, op: Op): Op | null {
 
     case 'image.delete': {
       const img = own(state.images, op.id) ?? fail('No such image.');
-      if (imageInUse(state, op.id)) fail(`"${img.name}" is in use as a map or on screen.`);
+      if (imageInUse(state, op.id)) fail(`"${img.name}" is in use as a map, the lobby background or on screen.`);
       delete state.images![op.id];
       return { kind: 'image.create', image: img };
     }
@@ -551,6 +551,7 @@ export function apply(state: RoomState, op: Op): Op | null {
     case 'sound.delete': {
       const snd = own(state.sounds, op.id) ?? fail('No such sound.');
       delete state.sounds![op.id];
+      if (state.lobby?.music === op.id) delete state.lobby.music;
       const m = state.music;
       if (m?.playlist.includes(op.id)) {
         const current = m.playlist[m.index];
@@ -602,6 +603,24 @@ export function apply(state: RoomState, op: Op): Op | null {
       return null; // music isn't undone (rewinding time doesn't make sense)
     }
 
+    case 'lobby': {
+      const set = op.set;
+      if (!set || typeof set !== 'object') fail('Nothing to change.');
+      const keys = Object.keys(set);
+      if (!keys.length || keys.some((k) => k !== 'image' && k !== 'music')) fail('Bad lobby change.');
+      if (set.image != null && !own(state.images, set.image)) fail('That image is not in the library.');
+      if (set.music != null && own(state.sounds, set.music)?.kind !== 'music') fail('Lobby music must be a music track in the library.');
+      const lobby = (state.lobby ??= {});
+      const prev = Object.fromEntries(keys.map((k) => [k, lobby[k as 'image' | 'music'] ?? null]));
+      for (const k of keys as ('image' | 'music')[]) {
+        const v = set[k];
+        if (v == null) delete lobby[k];
+        else lobby[k] = v;
+      }
+      if (!Object.keys(lobby).length) delete state.lobby;
+      return { kind: 'lobby', set: prev };
+    }
+
     case 'sfx':
       if (op.sound !== null && !own(state.sounds, op.sound)) fail('No such sound.');
       return null;
@@ -631,7 +650,7 @@ export function apply(state: RoomState, op: Op): Op | null {
  *  changing the table's map and hiding/revealing cards. The server checks this per sender. */
 export function gmOnly(op: Op): boolean {
   switch (op.kind) {
-    case 'zone.map': return true;
+    case 'zone.map': case 'lobby': return true;
     case 'piece.update': return !!op.set && typeof op.set === 'object' && op.set.visibleTo !== undefined;
     case 'batch': return Array.isArray(op.ops) && op.ops.some(gmOnly);
     default: return false;

@@ -124,6 +124,9 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
         ? item('Remove from the table', () => confirm(`Remove the map "${img.name}" from the table?`) && ctx.act({ kind: 'zone.map', id: zone, map: null }))
         : item('Set as map', () => send([...reveal(img), { kind: 'zone.map', id: zone, map: placeMap(img.id, anchorEl.querySelector('img')) }]))),
       item('Show to everyone', () => send([...reveal(img), { kind: 'spotlight', spotlight: { image: img.id, by: me() } }])),
+      canMap() && (state.lobby?.image === img.id
+        ? item('Stop using as lobby background', () => ctx.act({ kind: 'lobby', set: { image: null } }))
+        : item('Use as lobby background', () => send([...reveal(img), { kind: 'lobby', set: { image: img.id } }]))),
       !!zone && item('Put on the table', () => {
         const cardId = `card-img-${img.id}`.slice(0, 64);
         const ops: Op[] = [...reveal(img)];

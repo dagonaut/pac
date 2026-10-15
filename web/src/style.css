@@ -2397,3 +2397,174 @@ button.track {
   display: flex;
   gap: 6px;
 }
+
+/* ---- A room's lobby (pre-join screen) ---- */
+#room-lobby {
+  position: relative;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  overflow: hidden;
+}
+
+#room-lobby[hidden] {
+  display: none;
+}
+
+.lobby-bg {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 30%, #2d261e, var(--bg) 70%) center / cover no-repeat;
+}
+
+#room-lobby.has-bg .lobby-bg {
+  background-size: cover;
+  background-position: center;
+  filter: brightness(0.55);
+  transform: scale(1.03); /* hides the blurred edge */
+}
+
+.lobby-card {
+  position: relative;
+  width: min(720px, 100%);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  backdrop-filter: blur(6px);
+  border: 1px solid #4a3f31;
+  border-radius: var(--radius);
+  box-shadow: 0 20px 60px #000b;
+  padding: 1.5rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.lobby-card h1 {
+  margin: 0;
+  color: var(--accent);
+  letter-spacing: 0.03em;
+}
+
+.lobby-card > p {
+  margin: -0.6rem 0 0;
+}
+
+.lobby-card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-text);
+}
+
+.lobby-cols {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  gap: 1.2rem;
+}
+
+@media (max-width: 640px) {
+  .lobby-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lobby-people {
+  display: grid;
+  align-content: start;
+  gap: 0.4rem;
+}
+
+.faces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 3.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.faces p {
+  margin: 0;
+}
+
+.person {
+  margin: 0;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  width: 64px;
+}
+
+.person .face {
+  width: 48px;
+  height: 48px;
+}
+
+.person figcaption {
+  font-size: 0.8rem;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.lobby-self {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.lobby-preview {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.lobby-preview.no-cam {
+  transform: none;
+  display: grid;
+  place-items: center;
+  color: var(--muted-text);
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 8px;
+}
+
+.lobby-preview[hidden] {
+  display: none;
+}
+
+.lobby-self label.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-text);
+}
+
+.lobby-music {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lobby-music[hidden] {
+  display: none;
+}
+
+.lobby-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.lobby-buttons .primary {
+  background: var(--accent);
+  color: #1b150e;
+  font-weight: 700;
+  padding-inline: 1.6rem;
+}
+
+.sound-actions button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}

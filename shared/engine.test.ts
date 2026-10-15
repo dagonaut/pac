@@ -131,6 +131,24 @@ test('sound is strictly the GM seat\'s', () => {
   assert.equal(forbidden(s, play, 'Sam', true), null);
 });
 
+test('lobby background and music', () => {
+  const s = room();
+  apply(s, { kind: 'image.create', image: { id: 'bg', name: 'Tavern', src: '/assets/r/bg.png', kind: 'handout', hidden: false, by: 'Sam' } });
+  apply(s, { kind: 'sound.create', sound: { id: 'm', name: 'Theme', src: '/assets/r/m.mp3', kind: 'music', by: 'Sam' } });
+  apply(s, { kind: 'sound.create', sound: { id: 'fx', name: 'Boom', src: '/assets/r/fx.mp3', kind: 'sfx', by: 'Sam' } });
+  roundTrip(s, { kind: 'lobby', set: { image: 'bg', music: 'm' } });
+  apply(s, { kind: 'lobby', set: { image: 'bg', music: 'm' } });
+  assert.deepEqual(s.lobby, { image: 'bg', music: 'm' });
+  assert.throws(() => apply(s, { kind: 'lobby', set: { music: 'fx' } }), /music track/);
+  assert.throws(() => apply(s, { kind: 'image.delete', id: 'bg' }), /lobby/);
+  apply(s, { kind: 'sound.delete', id: 'm' }); // deleting the track clears it from the lobby
+  assert.deepEqual(s.lobby, { image: 'bg' });
+  apply(s, { kind: 'lobby', set: { image: null } });
+  assert.equal(s.lobby, undefined);
+  s.gm = 'Sam';
+  assert.match(forbidden(s, { kind: 'lobby', set: { image: null } }, 'Bo', false)!, /Only the GM/);
+});
+
 test('publicNames only names face-up, unhidden cards', () => {
   const s = room();
   apply(s, { kind: 'card.create', card: { id: 'c1', name: 'One', front: '/assets/r/1.png' } });

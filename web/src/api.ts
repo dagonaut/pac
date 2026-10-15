@@ -61,3 +61,18 @@ export const updatePlayer = (auth: Auth, id: string, set: { admin?: boolean; gm?
 export const resetLink = (auth: Auth, id: string) => post<{ link: string }>('/api/players/reset-link', { ...auth, id });
 
 export const removePlayer = (auth: Auth, id: string) => post<{ ok: true }>('/api/players/remove', { ...auth, id });
+
+export interface LobbyInfo {
+  room: { id: string; name: string; system: string };
+  gm: string | null;
+  background: { src: string; name: string } | null;
+  music: { src: string; name: string } | null;
+  /** Connected to the room now. */
+  here: string[];
+  /** Others on this lobby screen (not you). */
+  waiting: string[];
+}
+
+/** A room's pre-join screen; also marks you as waiting there (or, with `leave`, not). */
+export const lobbyInfo = (auth: Auth, room: string, name?: string, leave = false) =>
+  post<LobbyInfo>('/api/rooms/lobby', { ...auth, room, name, leave });

@@ -3,6 +3,7 @@
 //   POST /api/rooms        { AUTH }                        -> { rooms }
 //   POST /api/rooms/create { AUTH, name, system, setup }   -> { room }
 //   POST /api/rooms/archive { AUTH, room, archived }       -> { ok }
+//   POST /api/rooms/lobby  { AUTH, room, name?, leave? }   -> { room, gm, background, music, here, waiting }
 //   POST /api/join         { AUTH, room, name? }           -> { meeting, attendee, token, wsUrl, name, room }
 //   POST /api/players/<action>                             -> see players.ts
 // and, gated by the session token from /api/join instead (or a player credential, for portraits):
@@ -19,14 +20,14 @@ import {
 import { ConditionalCheckFailedException } from '@aws-sdk/client-dynamodb';
 import { S3Client } from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
-import { GetCommand, PutCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DeleteCommand, GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { apply, OpError, resolve } from '../../shared/engine.ts';
 import { emptyRoom, type Op } from '../../shared/model.ts';
 import type { RoomSummary } from '../../shared/protocol.ts';
 import {
-  cleanName, ddb, GAME_TABLE, json, loadState, signSession, STATE_SK, stateItem, verifySession,
+  cleanName, ddb, GAME_TABLE, json, loadState, roomPk, signSession, STATE_SK, stateItem, verifySession,
 } from './common.ts';
 import { AuthError, authenticate, type Caller, guestNameAllowed, playerFrom, playersRoute } from './players.ts';
 
@@ -174,6 +175,45 @@ async function archiveRoom(body: Record<string, unknown>) {
   return { ok: true };
 }
 
+// ---- Lobby (the pre-join screen) -------------------------------------------------------------
+
+const LOBBY_SEEN_S = 20; // someone polling the lobby (every ~5 s) counts as waiting for this long
+
+/** A room's lobby: its look (background, music), who's at the table, and who else is waiting.
+ *  Calling it also marks you as waiting (or, with `leave`, not). */
+async function lobby(body: Record<string, unknown>, caller: Caller) {
+  const room = String(body.room ?? '').trim().toLowerCase();
+  if (!/^[a-z0-9-]{1,40}$/.test(room)) throw new HttpError(400, 'Bad room.');
+  const name = 'player' in caller ? caller.player.name : cleanName(body.name);
+  const state = await loadState(room);
+  if (!state) throw new HttpError(404, `There's no room "${room}".`);
+  const now = Math.floor(Date.now() / 1000);
+  if (name) {
+    const key = { pk: roomPk(room), sk: `lobby#${name}` };
+    if (body.leave === true) await ddb.send(new DeleteCommand({ TableName: GAME_TABLE, Key: key }));
+    else await ddb.send(new PutCommand({ TableName: GAME_TABLE, Item: { ...key, name, seen: now, ttl: now + 3600 } }));
+  }
+  const rows = async (prefix: string) => ((await ddb.send(new QueryCommand({
+    TableName: GAME_TABLE,
+    KeyConditionExpression: 'pk = :pk AND begins_with(sk, :p)',
+    ExpressionAttributeValues: { ':pk': roomPk(room), ':p': prefix },
+  }))).Items ?? []);
+  const [conns, waiting] = await Promise.all([rows('conn#'), rows('lobby#')]);
+  const here = [...new Set(conns.map((c) => String(c.name)))].sort();
+  const bg = state.lobby?.image ? state.images?.[state.lobby.image] : undefined;
+  const music = state.lobby?.music ? state.sounds?.[state.lobby.music] : undefined;
+  return {
+    room: { id: room, name: state.name, system: state.system },
+    gm: state.gm,
+    background: bg ? { src: bg.src, name: bg.name } : null,
+    music: music ? { src: music.src, name: music.name } : null,
+    here,
+    waiting: waiting
+      .filter((w) => Number(w.seen) >= now - LOBBY_SEEN_S && w.name !== name && !here.includes(String(w.name)))
+      .map((w) => String(w.name)).sort(),
+  };
+}
+
 async function join(body: Record<string, unknown>, caller: Caller) {
   const room = String(body.room ?? '').trim().toLowerCase();
   // Players are who their link says; guests type a name, which mustn't be a player's.
@@ -270,6 +310,7 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
       case 'POST /api/rooms': return json(200, await listRooms());
       case 'POST /api/rooms/create': return json(200, await createRoom(body));
       case 'POST /api/rooms/archive': return json(200, await archiveRoom(body));
+      case 'POST /api/rooms/lobby': return json(200, await lobby(body, caller));
       case 'POST /api/join': return json(200, await join(body, caller));
       default: return json(404, { error: 'Not found.' });
     }

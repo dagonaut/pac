@@ -52,7 +52,7 @@ async function player(p: { name: string; credential: string }, url = site) {
   page.on('pageerror', (e) => console.log(`[${p.name}] page error:`, e.message));
   page.on('console', (m) => (m.type() === 'error' || process.env.DEBUG) && console.log(`[${p.name}] console ${m.type()}:`, m.text()));
   await page.goto(`${url}${url.includes('?') ? '&' : '?'}p=${p.credential}`);
-  await page.waitForSelector('#rooms:not([hidden])');
+  await page.waitForSelector(url.includes('room=') ? '#room-lobby:not([hidden])' : '#rooms:not([hidden])');
   assert.equal(await page.locator('#me-name').innerText(), p.name);
   assert.ok(!page.url().includes('p='), 'the credential is dropped from the address bar');
   return page;
@@ -136,7 +136,10 @@ try {
 
   // ---- Bo joins from the invite link and sees the same table -------------------------------------
   const bo = await player(boP, `${site}/?room=${roomId}`);
-  await bo.click('#room-list li.invited button:text-is("Join")');
+  // The invite link opens the room's lobby: Ana is already at the table.
+  await bo.waitForSelector('#room-lobby .lobby-people .faces >> text=Ana');
+  await shot(bo, '05z-lobby');
+  await bo.click('#room-lobby button:text-is("Join table")');
   await bo.waitForSelector('#room-view:not([hidden])', { timeout: 20000 });
   await bo.waitForSelector('.table-surface .piece.tapped.face-down');
   assert.match(await log(bo), /imported/);
@@ -533,8 +536,40 @@ try {
   // Pause stops everyone.
   await ana.click('.sound-panel .transport .play');
   await bo.waitForFunction(() => (document.querySelector('#music-audio') as HTMLAudioElement).paused);
+  // The GM sets the lobby: this track as its music, the map image as its background.
+  await ana.click('.sound-panel li:has-text("Long Theme") button:text-is("Lobby")');
+  await ana.waitForSelector('.sound-panel li:has-text("Long Theme") button:text-is("★ Lobby")');
   await ana.click('#sound-btn');
+  await ana.click('.drawer-tab');
+  await ana.click('.image-grid .thumb');
+  await ana.click('.menu .menu-item:text-is("Use as lobby background")');
+  await untilLog(bo, 'set the lobby background');
+  await ana.click('.drawer-tab');
   await ana.click('#gm-btn'); // leave the seat
+
+  // Bo leaves and comes back through the lobby: background, music, and Ana at the table.
+  await bo.click('#leave-btn');
+  await bo.waitForSelector('#rooms:not([hidden])');
+  await bo.click(`#room-list li:has-text("${roomName}") button:text-is("Join")`);
+  await bo.waitForSelector('#room-lobby.has-bg .lobby-people .faces >> text=Ana');
+  assert.match(await bo.locator('.lobby-bg').evaluate((e) => (e as HTMLElement).style.backgroundImage), /\/assets\//);
+  await bo.waitForFunction(() => {
+    const a = document.querySelector('#room-lobby audio') as HTMLAudioElement;
+    return !!a && !a.paused && decodeURIComponent(a.currentSrc).includes('/assets/');
+  }, null, { timeout: 10000 });
+  assert.match(await bo.locator('.lobby-music').innerText(), /Long Theme/);
+  await shot(bo, '11c-lobby-with-background');
+  // Bo isn't listed as waiting for himself.
+  assert.match(await bo.locator('.lobby-people .faces').nth(1).innerText(), /Just you/);
+  await bo.click('#room-lobby button:text-is("Join table")');
+  await bo.waitForSelector('#room-view:not([hidden])', { timeout: 20000 });
+  assert.ok(await bo.locator('#room-lobby audio').evaluate((a) => (a as HTMLAudioElement).paused), 'lobby music stops at the table');
+  await untilLog(bo, 'set the lobby background'); // the room snapshot has arrived (so new chat counts as unread)
+  // From the lobby's point of view, Bo is at the table now, not waiting.
+  const seen = await (await fetch(`${site}/api/rooms/lobby`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key, room: roomId, name: 'zz-check', leave: true }),
+  })).json() as { here: string[]; waiting: string[] };
+  assert.deepEqual([seen.here, seen.waiting], [['Ana', 'Bo'], []]);
 
   // Chat & dice panel: hide it, get an unread count, show it again.
   await bo.click('#side-tab');

@@ -136,7 +136,7 @@ export class VttStack extends Stack {
     const api = new HttpApi(this, 'Api', { apiName: 'pac-vtt-api' });
     const apiIntegration = new HttpLambdaIntegration('ApiIntegration', apiFn);
     const players = ['setup', 'me', 'list', 'add', 'update', 'reset-link', 'remove'].map((a) => `/api/players/${a}`);
-    for (const p of ['/api/join', '/api/rooms', '/api/rooms/create', '/api/rooms/archive', '/api/assets', ...players]) {
+    for (const p of ['/api/join', '/api/rooms', '/api/rooms/create', '/api/rooms/archive', '/api/rooms/lobby', '/api/assets', ...players]) {
       api.addRoutes({ path: p, methods: [HttpMethod.POST], integration: apiIntegration });
     }
     // Cheap guard against someone hammering the endpoint.

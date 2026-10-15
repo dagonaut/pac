@@ -260,7 +260,14 @@ export function createSound(header: HTMLElement, ctx: SoundCtx) {
   }
 
   function soundActions(s: SoundDef) {
+    const inLobby = st()?.lobby?.music === s.id;
     return h('span.sound-actions', {},
+      s.kind === 'music' && h('button', {
+        type: 'button',
+        className: inLobby ? 'active' : '',
+        title: inLobby ? 'Plays in the lobby (click to stop)' : 'Play this in the room\'s lobby, before people join',
+        onclick: () => void ctx.act({ kind: 'lobby', set: { music: inLobby ? null : s.id } }),
+      }, inLobby ? '★ Lobby' : 'Lobby'),
       h('button', { type: 'button', title: 'Rename', onclick: () => {
         const name = prompt('Name:', s.name)?.trim().slice(0, 120);
         if (name) void ctx.act({ kind: 'sound.update', id: s.id, set: { name } });

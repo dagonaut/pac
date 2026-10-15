@@ -151,6 +151,8 @@ export interface RoomState {
   /** Sound library (music and effects). Optional for older rooms. */
   sounds?: Record<string, SoundDef>;
   music?: MusicState;
+  /** The pre-join screen: a background image (from `images`) and looping music (from `sounds`). */
+  lobby?: { image?: string; music?: string };
 }
 
 export interface DiceTerm {
@@ -208,6 +210,8 @@ export type Op =
   /** Change the music. The server stamps `at` (its clock, ms) so everyone agrees when a track
    *  started; `position` (s) seeks, and changing `index` starts that track from the top. */
   | { kind: 'music'; set: { playlist?: string[]; index?: number; playing?: boolean; position?: number; loop?: MusicLoop; shuffle?: boolean; volume?: number }; at?: number }
+  /** Set (or clear, with null) the lobby's background image and music. */
+  | { kind: 'lobby'; set: { image?: string | null; music?: string | null } }
   /** Play a sound effect once on everyone's speakers (`sound: null` stops all effects). */
   | { kind: 'sfx'; sound: string | null }
   | { kind: 'batch'; ops: Op[] }

@@ -12,6 +12,7 @@ import { createTemplates } from './templates';
 import { addEntry, clearLog, note, resetLog, setNameColors } from './log';
 import { face, openPlayers, openProfile } from './players';
 import { createSound } from './sound';
+import { createLobby } from './lobby';
 import { cameraError, getPermissions, micError, pick, probeCamera } from './media';
 import { setupOps, systemName, systems } from './systems/index';
 
@@ -24,6 +25,7 @@ const roomsCard = $<HTMLElement>('#rooms');
 const roomList = $<HTMLUListElement>('#room-list');
 const newRoomForm = $<HTMLFormElement>('#new-room');
 const lobbyError = $<HTMLParagraphElement>('#lobby-error');
+const roomLobby = $<HTMLElement>('#room-lobby');
 const stage = $<HTMLElement>('#stage');
 const micBtn = $<HTMLButtonElement>('#mic-btn');
 const camBtn = $<HTMLButtonElement>('#cam-btn');
@@ -129,6 +131,8 @@ setupBtn.addEventListener('click', async () => {
 // ---- Lobby ----------------------------------------------------------------------------------
 
 function showLobbyError(msg: string) {
+  // On a room's lobby screen, errors (a blocked mic, a taken name) show there.
+  if (!roomLobby.hidden) return lobbyScreen.showError(msg);
   lobbyError.textContent = msg;
   lobbyError.hidden = !msg;
 }
@@ -142,6 +146,7 @@ function ago(iso: string) {
 }
 
 let showArchived = false;
+let inviteOpened = false;
 let lastRooms: RoomSummary[] = [];
 
 function renderRooms(all: RoomSummary[]) {
@@ -164,7 +169,7 @@ function renderRooms(all: RoomSummary[]) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.textContent = 'Join';
-      btn.addEventListener('click', () => void enterRoom(r.id, btn));
+      btn.addEventListener('click', () => openLobby(r.id));
       const archive = document.createElement('button');
       archive.type = 'button';
       archive.className = 'archive-btn';
@@ -223,6 +228,11 @@ async function loadRooms() {
     }
     renderRooms(rooms);
     roomsCard.hidden = false;
+    // An invite link goes straight to that room's lobby (once).
+    if (invitedRoom && !inviteOpened && rooms.some((r) => r.id === invitedRoom)) {
+      inviteOpened = true;
+      openLobby(invitedRoom);
+    }
   } catch (e) {
     roomsCard.hidden = true;
     showLobbyError((e as Error).message);
@@ -263,6 +273,32 @@ newRoomForm.addEventListener('submit', async (e) => {
     submit.disabled = false;
   }
 });
+
+// ---- A room's lobby (the screen before the table) ------------------------------------------
+
+const lobbyScreen = createLobby(roomLobby, {
+  auth,
+  guestName: () => (mePlayer ? undefined : who.name.value.trim()),
+  players: async () => {
+    await loadPlayers();
+    return roster;
+  },
+  camera: cameraBox,
+  join: (room, button) => enterRoom(room, button),
+  back: () => {
+    lobby.hidden = false;
+    history.replaceState(null, '', location.pathname);
+    void loadRooms();
+  },
+});
+
+function openLobby(id: string) {
+  if (!mePlayer && !whoForm.reportValidity()) return;
+  showLobbyError('');
+  lobby.hidden = true;
+  history.replaceState(null, '', `?room=${encodeURIComponent(id)}`);
+  void lobbyScreen.open(id);
+}
 
 // Returning players (and guests who've been here before) skip straight to the room list.
 async function start() {
@@ -597,13 +633,17 @@ function leftRoom(reason: string) {
   void loadRooms();
 }
 
-async function enterRoom(id: string, button: HTMLButtonElement) {
-  if (!mePlayer && !whoForm.reportValidity()) return;
+/** Join a room's table (A/V + game). Resolves false, with the reason shown, if that failed. */
+async function enterRoom(id: string, button: HTMLButtonElement): Promise<boolean> {
+  if (!mePlayer && !whoForm.reportValidity()) return false;
   showLobbyError('');
   button.disabled = true;
   try {
     const perms = await getPermissions(cameraBox.checked).catch((e: Error) => e);
-    if (perms instanceof Error) return showLobbyError(micError(perms));
+    if (perms instanceof Error) {
+      showLobbyError(micError(perms));
+      return false;
+    }
 
     const join = await joinRoom(auth(), id, mePlayer ? undefined : who.name.value.trim());
     void loadPlayers();
@@ -655,11 +695,13 @@ async function enterRoom(id: string, button: HTMLButtonElement) {
     renderControls();
     await refreshDevices();
     if (perms.cameraError) note(cameraError(perms.cameraError));
+    return true;
   } catch (err) {
     console.error(err);
     game?.close();
     game = null;
     showLobbyError(`Something went wrong: ${(err as Error).message}`);
+    return false;
   } finally {
     button.disabled = false;
   }

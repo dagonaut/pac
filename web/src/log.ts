@@ -106,6 +106,10 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
       if (s.volume !== undefined) return `set the music volume to ${Math.round(s.volume * 100)}%`;
       return 'changed the music';
     }
+    case 'lobby': {
+      if (op.set.image !== undefined) return op.set.image ? `set the lobby background to ${state.images?.[op.set.image]?.name ?? 'an image'}` : 'removed the lobby background';
+      return op.set.music ? `set the lobby music to ${state.sounds?.[op.set.music]?.name ?? 'a track'}` : 'turned off the lobby music';
+    }
     case 'sfx': return op.sound ? `played ${state.sounds?.[op.sound]?.name ?? 'a sound effect'}` : 'stopped the sound effects';
     case 'stroke.update': return op.set.text !== undefined ? `changed text to "${firstLine(op.set.text)}"` : 'moved a drawing';
     case 'batch': {
