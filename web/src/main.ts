@@ -1,8 +1,10 @@
-import type { RoomState } from '../../shared/model.ts';
+import { describeRoll } from '../../shared/dice.ts';
+import type { Op, RoomState } from '../../shared/model.ts';
 import type { RoomSummary } from '../../shared/protocol.ts';
 import { archiveRoom, createRoom, joinRoom, listRooms } from './api';
 import type { AvSession, Participant, VideoTile } from './av';
 import { createBoard } from './board';
+import { h, toast } from './dom';
 import { joinChime } from './chime-av';
 import { GameClient } from './game';
 import { createImporter, uploadImage } from './importer';
@@ -204,6 +206,7 @@ interface Card {
   video: HTMLVideoElement;
   label: HTMLElement;
   tileId: number | null;
+  name: string;
 }
 const cards = new Map<string, Card>();
 
@@ -220,7 +223,7 @@ function card(participantId: string): Card {
     label.textContent = 'Joining…';
     el.append(video, label);
     stage.append(el);
-    c = { el, video, label, tileId: null };
+    c = { el, video, label, tileId: null, name: '' };
     cards.set(participantId, c);
   }
   return c;
@@ -236,6 +239,7 @@ function renderRoster(participants: Participant[]) {
   }
   for (const p of participants) {
     const c = card(p.id);
+    c.name = p.name;
     c.label.textContent = p.local ? `${p.name} (you)` : p.name;
     c.el.classList.toggle('local', p.local);
     c.el.classList.toggle('muted', p.muted);
@@ -259,6 +263,29 @@ function removeTile(tileId: number) {
       c.el.classList.remove('has-video');
     }
   }
+}
+
+// ---- Room: dice on the video tiles ----------------------------------------------------------
+
+/** Show a roll on the roller's video tile for a few seconds (or as a toast if they have no tile),
+ *  so everyone sees results without opening Chat & dice. */
+function showRoll(by: string, op: Op) {
+  if (op.kind === 'batch') return op.ops.forEach((o) => showRoll(by, o));
+  if (op.kind !== 'roll' || !op.result) return;
+  const r = op.result;
+  const what = op.label ? `${op.label} (${op.expr})` : op.expr;
+  const detail = describeRoll(r).replace(/ = -?\d+$/, '');
+  const tile = [...cards.values()].find((c) => c.name === by);
+  if (!tile) {
+    toast(`${by} rolled ${what}: ${r.total}`);
+    return;
+  }
+  tile.el.querySelector('.roll-bubble')?.remove();
+  const bubble = h('div.roll-bubble', { title: `${what}: ${describeRoll(r)}` },
+    h('b', {}, String(r.total)), h('small', {}, what), h('small.roll-detail', {}, detail));
+  tile.el.append(bubble);
+  setTimeout(() => bubble.classList.add('fading'), 7000);
+  setTimeout(() => bubble.remove(), 8000);
 }
 
 // ---- Room: game state -----------------------------------------------------------------------
@@ -460,6 +487,7 @@ async function enterRoom(id: string, button: HTMLButtonElement) {
         board.render(state);
         addEntry(entry, state, me);
         countUnread(entry.op.kind, entry.by);
+        showRoll(entry.by, entry.op);
       },
       status: (connected) => ($('#conn-status').hidden = connected),
       error: (message) => note(message),

@@ -32,3 +32,18 @@ export function h<K extends keyof HTMLElementTagNameMap>(
 export const $ = <T extends HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector<T>(sel)!;
 
 export const shortId = () => crypto.randomUUID().replace(/-/g, '').slice(0, 10);
+
+const toasts = h('div.toasts');
+
+/** A short notice at the bottom of the screen, with an optional action button (e.g. Undo). */
+export function toast(text: string, action?: { label: string; run: () => unknown }, ms = 8000) {
+  if (!toasts.isConnected) document.body.append(toasts);
+  const el = h('div.toast', {}, h('span', {}, text));
+  const close = () => el.remove();
+  if (action) {
+    el.append(h('button', { type: 'button', onclick: () => { close(); void action.run(); } }, action.label));
+  }
+  toasts.append(el);
+  setTimeout(close, ms);
+  return el;
+}

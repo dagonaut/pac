@@ -65,7 +65,7 @@ export function pieceEl(p: Piece, state: RoomState, me: string): HTMLElement {
   }
   const face = faceOf(p, state, me);
   const colors = Object.keys(p.counters).map((n) => counterColor(state, n));
-  const key = JSON.stringify([face, p.tapped, p.upgraded, p.counters, colors, p.note, p.visibleTo]);
+  const key = JSON.stringify([face, p.tapped, p.upgraded, p.counters, colors, p.note, p.visibleTo, !!p.locked]);
   if (el.dataset.key !== key) {
     el.dataset.key = key;
     const body = face.src
@@ -75,11 +75,13 @@ export function pieceEl(p: Piece, state: RoomState, me: string): HTMLElement {
     if (p.upgraded) badges.append(h('span.badge.upgraded', { title: 'Upgraded' }, '★'));
     if (p.note) badges.append(h('span.badge.note', { title: p.note }, '✎'));
     if (face.secret) badges.append(h('span.badge.secret', { title: 'Hidden from other players' }, '👁'));
+    if (p.locked) badges.append(h('span.badge.locked', { title: 'Locked in place' }, '🔒'));
     el.replaceChildren(body, badges);
   }
   el.style.setProperty('--scale', String(p.scale ?? 1));
   el.classList.toggle('tapped', p.tapped);
   el.classList.toggle('face-down', !face.front);
+  el.classList.toggle('locked', !!p.locked);
   el.title = cardName(p, state, me);
   return el;
 }

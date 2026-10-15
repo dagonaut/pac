@@ -5,7 +5,7 @@ import { newPiece } from '../../shared/engine.ts';
 import type { ImageDef, Op, RoomState } from '../../shared/model.ts';
 import { h, shortId } from './dom';
 import { uploadOne, uploadUrls } from './importer';
-import { heading, item, openMenu } from './menu';
+import { closeMenu, heading, item, openMenu } from './menu';
 
 export interface ImagesCtx {
   me(): string;
@@ -23,6 +23,8 @@ export interface ImagesCtx {
 const TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif'];
 const PER_BATCH = 40; // image.create ops per message (32 KB WebSocket frames)
 const HANDOUT_SCALE = 2.5; // a handout put on the table starts ~275px wide
+const MAP_MARGIN = 400; // free table kept around a map on every side
+const MAX_FRAME = 24000; // bytes of ops per message, under the 32 KB WebSocket frame
 
 type Filter = 'all' | 'map' | 'handout';
 
@@ -58,6 +60,7 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
     open = force ?? !open;
     drawer.hidden = !open;
     tab.classList.toggle('active', open);
+    area.classList.toggle('drawer-open', open); // moves the map controls out from under it
     tab.title = open ? 'Hide maps and handouts' : 'Show maps and handouts';
     if (open) fill();
   }
@@ -92,13 +95,20 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
   const send = (ops: Op[]) => ctx.act(ops.length === 1 ? ops[0] : { kind: 'batch', ops });
 
   /** A new map: shrunk to fit the table if it's bigger, and centered on the table. */
+  /** Where a newly set map goes: shrunk to fit inside a margin, centered on the table, so there's
+   *  free table on all four sides for cards, tokens and notes. */
   function placeMap(image: string, thumbImg: HTMLImageElement | null) {
-    const nw = thumbImg?.naturalWidth || ctx.tableSize.w;
-    const nh = thumbImg?.naturalHeight || ctx.tableSize.h;
-    const scale = Math.round(Math.min(1, ctx.tableSize.w / nw, ctx.tableSize.h / nh) * 100) / 100 || 1;
-    const x = Math.max(0, Math.round((ctx.tableSize.w - nw * scale) / 2));
-    const y = Math.max(0, Math.round((ctx.tableSize.h - nh * scale) / 2));
-    return { image, scale, x, y };
+    const { w: W, h: H } = ctx.tableSize;
+    const nw = thumbImg?.naturalWidth || W;
+    const nh = thumbImg?.naturalHeight || H;
+    const scale = Math.max(0.1, Math.floor(Math.min(1, (W - 2 * MAP_MARGIN) / nw, (H - 2 * MAP_MARGIN) / nh) * 100) / 100);
+    return { image, scale, ...centeredAt(nw * scale, nh * scale) };
+  }
+
+  /** Top-left corner that centers a w×h map on the table, keeping at least the margin around it. */
+  function centeredAt(w: number, hgt: number) {
+    const { w: W, h: H } = ctx.tableSize;
+    return { x: Math.round(Math.max(MAP_MARGIN, (W - w) / 2)), y: Math.round(Math.max(MAP_MARGIN, (H - hgt) / 2)) };
   }
 
   function imageMenu(img: ImageDef, anchorEl: HTMLElement) {
@@ -260,12 +270,95 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
     h('button', { type: 'button', title: 'Smaller map', onclick: () => scaleMap(1 / 1.25) }, '−'),
     mapPct, h('span.pct-sign', {}, '%'),
     h('button', { type: 'button', title: 'Bigger map', onclick: () => scaleMap(1.25) }, '+'),
-    h('button.map-remove', { type: 'button', title: 'Remove the map from the table', onclick: () => {
-      const z = ctx.tableZone();
-      const name = z ? st().images?.[st().zones[z]?.map?.image ?? '']?.name : undefined;
-      if (z && confirm(`Remove the map${name ? ` "${name}"` : ''} from the table? (It stays in Images.)`)) void ctx.act({ kind: 'zone.map', id: z, map: null });
-    } }, 'Remove'));
+    h('button', { type: 'button', title: 'Center the map on the table (cards and drawings on it move with it)', onclick: () => void centerMap() }, 'Center'),
+    h('button.map-remove', { type: 'button', title: 'Remove the map from the table', onclick: () => removeMap() }, 'Remove'));
   area.append(mapBox);
+
+  function removeMap() {
+    const z = ctx.tableZone();
+    const name = z ? st().images?.[st().zones[z]?.map?.image ?? '']?.name : undefined;
+    if (z && confirm(`Remove the map${name ? ` "${name}"` : ''} from the table? (It stays in Images.)`)) void ctx.act({ kind: 'zone.map', id: z, map: null });
+  }
+
+  /** Move the map to the middle of the table (with a margin all round), taking everything on it
+   *  along: the cards and tokens on top of the map and the drawings over it. */
+  async function centerMap() {
+    const z = ctx.tableZone();
+    const map = z ? st().zones[z]?.map : undefined;
+    if (!z || !map || !mapImg.naturalWidth) return;
+    const w = mapImg.naturalWidth * map.scale;
+    const hgt = mapImg.naturalHeight * map.scale;
+    const x0 = map.x ?? 0;
+    const y0 = map.y ?? 0;
+    const { x, y } = centeredAt(w, hgt);
+    const dx = x - x0;
+    const dy = y - y0;
+    if (!dx && !dy) return ctx.note('The map is already centered.');
+    const on = (px: number, py: number) => px >= x0 && px <= x0 + w && py >= y0 && py <= y0 + hgt;
+    const ops: Op[] = [{ kind: 'zone.map', id: z, map: { ...map, x, y } }];
+    for (const p of Object.values(st().pieces)) {
+      // `locked` is sent so locked tokens on the map come along too (the engine allows a move that
+      // says what the lock should be).
+      if (p.zone === z && on(p.x, p.y)) ops.push({ kind: 'piece.update', id: p.id, set: { x: p.x + dx, y: p.y + dy, ...(p.locked ? { locked: true } : {}) } });
+    }
+    for (const k of Object.values(st().strokes ?? {})) {
+      if (k.zone !== z || !on(k.points[0], k.points[1])) continue;
+      ops.push({ kind: 'stroke.update', id: k.id, set: { points: k.points.map((v, i) => v + (i % 2 ? dy : dx)) } });
+    }
+    // Split into messages that fit a WebSocket frame; the map moves in the first one.
+    let chunk: Op[] = [];
+    let size = 0;
+    for (const op of ops) {
+      const n = JSON.stringify(op).length;
+      if (chunk.length && (size + n > MAX_FRAME || chunk.length >= 150)) {
+        if (!(await ctx.act({ kind: 'batch', ops: chunk }))) return;
+        chunk = [];
+        size = 0;
+      }
+      chunk.push(op);
+      size += n;
+    }
+    if (chunk.length) await ctx.act(chunk.length === 1 ? chunk[0] : { kind: 'batch', ops: chunk });
+  }
+
+  /** Right-click the map: the same size controls a card has, plus Center and Remove. */
+  function mapMenu(at: { clientX: number; clientY: number }) {
+    const z = ctx.tableZone();
+    const map = z ? st().zones[z]?.map : undefined;
+    if (!map) return;
+    const pct = h('input.pct', { type: 'number', min: '10', max: '1000', step: '5', value: String(Math.round(map.scale * 100)), title: 'Map size in percent' });
+    let committed = false;
+    const commit = () => {
+      const v = Number(pct.value);
+      if (committed || !Number.isFinite(v) || v <= 0) return;
+      committed = true;
+      closeMenu();
+      setMapScale(v / 100);
+    };
+    pct.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), commit()));
+    pct.addEventListener('change', commit);
+    const step = (f: number) => () => { closeMenu(); scaleMap(f); };
+    openMenu(new DOMRect(at.clientX, at.clientY, 0, 0),
+      heading(`Map: ${st().images?.[map.image]?.name ?? ''}`),
+      h('div.size-row', {},
+        h('span', {}, 'Size'),
+        h('button', { type: 'button', title: 'Smaller', onclick: step(1 / 1.25) }, '−'),
+        pct, h('span.pct-sign', {}, '%'),
+        h('button', { type: 'button', title: 'Bigger', onclick: step(1.25) }, '+'),
+        h('button', { type: 'button', title: 'Actual size', onclick: () => { closeMenu(); setMapScale(1); } }, '1×')),
+      item('Center on the table', () => centerMap()),
+      h('hr'),
+      item('Remove from the table…', () => removeMap(), { danger: true }),
+    );
+  }
+
+  surface.addEventListener('contextmenu', (e) => {
+    if (mapImg.hidden || !canMap() || (e.target as HTMLElement).closest('.piece')) return;
+    const r = mapImg.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+    e.preventDefault();
+    mapMenu(e);
+  });
 
   function setMapScale(scale: number) {
     const z = ctx.tableZone();
@@ -304,9 +397,10 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
     mapImg.style.width = `${w}px`;
     mapImg.style.left = `${x}px`;
     mapImg.style.top = `${y}px`;
-    // Let the table grow to fit a big (or far-placed) map.
-    surface.style.width = `${Math.max(ctx.tableSize.w, Math.ceil(x + w))}px`;
-    surface.style.height = `${Math.max(ctx.tableSize.h, Math.ceil(y + hgt))}px`;
+    // Let the table grow to fit a big (or far-placed) map, keeping free table past its far edges.
+    const pad = x || y ? MAP_MARGIN : 0; // maps set before centering sit in the corner; leave those as they were
+    surface.style.width = `${Math.max(ctx.tableSize.w, Math.ceil(x + w + pad))}px`;
+    surface.style.height = `${Math.max(ctx.tableSize.h, Math.ceil(y + hgt + pad))}px`;
     if (centeredOn !== map.image && w > 0) {
       centeredOn = map.image;
       const wrap = surface.parentElement!;

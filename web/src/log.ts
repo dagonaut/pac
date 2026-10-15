@@ -58,6 +58,13 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
       if (s.note !== undefined) return `wrote a note on ${card(op.id)}`;
       if (s.scale !== undefined) return `resized ${card(op.id)}`;
       if (s.x !== undefined) return `moved ${card(op.id)}`;
+      if (s.locked !== undefined) return `${s.locked ? 'locked' : 'unlocked'} ${card(op.id)}`;
+      if (s.index !== undefined) {
+        // The state is already updated: the piece is either on top of its zone or underneath.
+        const p = state.pieces[op.id];
+        const top = !!p && Object.values(state.pieces).every((q) => q.zone !== p.zone || q.index <= p.index);
+        return `${top ? 'brought' : 'sent'} ${card(op.id)} to the ${top ? 'front' : 'back'}`;
+      }
       return `changed ${card(op.id)}`;
     }
     case 'draw': return `drew ${op.count} from ${zone(op.from)} to ${zone(op.to)}`;

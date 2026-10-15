@@ -4,11 +4,11 @@ A homebrew virtual tabletop for our online TTRPG group: live audio/video plus cu
 
 Prototype, usable at the table:
 - **Rooms** that persist between sessions, each tied to one game system. They can be archived from the lobby.
-- **Audio/video**: a strip of video tiles.
+- **Audio/video**: a strip of video tiles. Everyone's dice results pop up on their tile.
 - **Cards**: bulk-import card images. Decks with random server-side draws, face-up rows, discard piles. Drag cards anywhere. Flip, tap, upgrade (with optional upgraded art), counters, notes, and a GM seat that can hide cards. A card library for adding copies.
 - **Sheets**: one per player, made from a **sheet template** (JSON, see below): sections of typed fields (numbers you can click to roll, tracks, choices, notes, die sizes) and card slots. Templates have a builder with live preview and a JSON view, and they export and import between rooms.
-- **Images**: a pull-out drawer of maps and handouts per room. Upload in bulk, optionally hidden until shown. Set one as the table's background map, show one big on everyone's screen (spotlight), or put it on the table as a movable piece.
-- **Table**: pan/zoom, optional grid, resizable pieces, **live drawing** (freehand, lines, arrows, boxes, circles, text labels), and pings.
+- **Images**: a pull-out drawer of maps and handouts per room. Upload in bulk, optionally hidden until shown. Set one as the table's background map (centered with free table around it; right-click it to size or re-center it), show one big on everyone's screen (spotlight), or put it on the table as a movable piece.
+- **Table**: pan/zoom, optional grid, resizable pieces that can be locked in place and brought to the front or sent to the back, **live drawing** (freehand, lines, arrows, boxes, circles, text labels), and pings.
 - **Dice**: expressions like `2d6+3`, rolled on the server. Chat, a log of every action, and undo.
 
 ## Layout

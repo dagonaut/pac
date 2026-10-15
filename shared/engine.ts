@@ -127,7 +127,7 @@ function checkPieceProps(set: Partial<PieceProps>, state: RoomState) {
       switch (k) {
         case 'zone': return isId(v) && !!own(state.zones, v);
         case 'index': case 'x': case 'y': return isNum(v);
-        case 'faceUp': case 'tapped': case 'upgraded': return typeof v === 'boolean';
+        case 'faceUp': case 'tapped': case 'upgraded': case 'locked': return typeof v === 'boolean';
         case 'note': return isText(v, 1000);
         case 'visibleTo': return VISIBILITY.includes(v as Visibility);
         case 'owner': return v === undefined || isText(v, 40);
@@ -338,17 +338,23 @@ export function apply(state: RoomState, op: Op): Op | null {
       const p = own(state.pieces, op.id) ?? fail(`No piece ${op.id}.`);
       if (!op.set || typeof op.set !== 'object') fail('Nothing to update.');
       checkPieceProps(op.set, state);
+      // A locked piece stays put until someone unlocks it. An update that says what the lock should
+      // be may move it (unlock-and-move, or a deliberate move like re-centering the map).
+      if (p.locked && op.set.locked === undefined && (['zone', 'x', 'y', 'index'] as const).some((k) => op.set[k] !== undefined && op.set[k] !== p[k])) {
+        fail('That piece is locked. Unlock it first.');
+      }
       const set: Partial<PieceProps> = { ...op.set };
       // Moving to another zone without an index appends to the end of it.
       if (set.zone !== undefined && set.zone !== p.zone && set.index === undefined) set.index = nextIndex(state, set.zone);
       // JSON drops undefined, so optional fields go into the inverse as their defaults.
-      const defaults: Partial<PieceProps> = { scale: 1, owner: '' };
+      const defaults: Partial<PieceProps> = { scale: 1, owner: '', locked: false };
       const prev = Object.fromEntries(
         Object.keys(set).map((k) => [k, structuredClone(p[k as keyof PieceProps] ?? defaults[k as keyof PieceProps])]),
       );
       Object.assign(p, structuredClone(set));
       if (p.scale === 1) delete p.scale;
       if (p.owner === '') delete p.owner;
+      if (!p.locked) delete p.locked;
       return { kind: 'piece.update', id: op.id, set: prev as Partial<PieceProps> };
     }
 

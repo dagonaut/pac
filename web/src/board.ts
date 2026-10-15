@@ -55,7 +55,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
   surface.classList.toggle('grid', snap);
   const GRID = 40;
   const hint = h('div.table-hint', {},
-    h('div', {}, 'Drag cards here from a row, sheet or pile.', h('br'), 'Drag empty space to pan · Ctrl+scroll to zoom · hover a card and press F / T / U'));
+    h('div', {}, 'Drag cards here from a row, sheet or pile.', h('br'), 'Drag empty space to pan · Ctrl+scroll to zoom · hover a card and press F / T / U / L'));
   const zoomBox = h('div.zoom',
     {},
     h('label', { title: 'Snap cards to a 40px grid when you drop them' }, snapBox, 'Grid'),
@@ -257,9 +257,18 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     );
   }
 
+  /** Move a table piece above (or below) everything else on the table. Stacking follows index. */
+  function restack(p: Piece, to: 'front' | 'back') {
+    const others = piecesIn(st(), p.zone).filter((q) => q.id !== p.id).map((q) => q.index);
+    if (!others.length) return;
+    const index = to === 'front' ? Math.max(...others) + 1 : Math.min(...others) - 1;
+    if (index !== p.index) return update(p.id, { index });
+  }
+
   function pieceMenu(p: Piece, anchor: DOMRect) {
     const card = st().cards[p.def];
     const face = faceOf(p, st(), me());
+    const onBoard = st().zones[p.zone]?.kind === 'board';
     openMenu(anchor,
       heading(cardName(p, st(), me())),
       item(p.faceUp ? 'Flip face down' : 'Flip face up', () => update(p.id, { faceUp: !p.faceUp }), { hint: 'F' }),
@@ -276,9 +285,12 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
       isGm() && item(p.visibleTo === 'all' ? 'Hide from players' : 'Show to everyone',
         () => update(p.id, { visibleTo: p.visibleTo === 'all' ? 'gm' : 'all' })),
       face.front && item('Show large', () => showPreview(p, true)),
-      st().zones[p.zone]?.kind === 'board' && sizeRow(p),
-      heading('Send to'),
-      ...sendToItems(p),
+      onBoard && sizeRow(p),
+      onBoard && item(p.locked ? 'Unlock' : 'Lock in place', () => update(p.id, { locked: !p.locked }), { hint: 'L' }),
+      onBoard && item('Bring to front', () => restack(p, 'front')),
+      onBoard && item('Send to back', () => restack(p, 'back')),
+      p.locked ? h('p.menu-hint', {}, 'Locked: unlock it to move it or send it elsewhere.') : heading('Send to'),
+      ...(p.locked ? [] : sendToItems(p)),
       h('hr'),
       item('Delete card', () => confirm(`Remove ${cardName(p, st(), me())} from the table?`) && ctx.act({ kind: 'piece.delete', id: p.id }), { danger: true }),
     );
@@ -506,6 +518,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     if (!drag) return;
     if (!drag.ghost) {
       if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 5) return;
+      if (st().pieces[drag.id]?.locked) return; // locked: a click still opens the menu, no drag
       const r = drag.el.getBoundingClientRect();
       const tapped = drag.el.classList.contains('tapped');
       // The copy follows the pointer, so drop the table position it was cloned with (left/top
@@ -614,6 +627,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     if (key === 'f') void update(p.id, { faceUp: !p.faceUp });
     else if (key === 't') void update(p.id, { tapped: !p.tapped });
     else if (key === 'u') void update(p.id, { upgraded: !p.upgraded });
+    else if (key === 'l' && st().zones[p.zone]?.kind === 'board') void update(p.id, { locked: !p.locked });
     else return;
     e.preventDefault();
   });
@@ -706,14 +720,16 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     if (table) {
       surface.dataset.zone = table.id;
       const onTable = piecesIn(state, table.id);
-      for (const p of onTable) {
+      // Stacking follows index order (Bring to front / Send to back change it); the rank, not the
+      // raw index, sets z-index so it never drops below the map and drawings.
+      onTable.forEach((p, rank) => {
         const el = pieceEl(p, state, me());
         el.style.left = `${p.x}px`;
         el.style.top = `${p.y}px`;
-        el.style.zIndex = String(Math.round(p.index) + 10);
+        el.style.zIndex = String(rank + 10);
         if (el.parentElement !== surface) surface.append(el);
         keep.add(p.id);
-      }
+      });
     } else {
       delete surface.dataset.zone;
     }

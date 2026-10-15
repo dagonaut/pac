@@ -282,6 +282,22 @@ await bo.waitForFunction((x) => document.querySelector('svg.ink text[data-stroke
 await shot(bo, '07b-shapes-and-text');
 await ana.keyboard.press('Escape');
 
+// Clear asks first: Cancel keeps everything; Clear removes it, and the toast's Undo brings it back.
+const inkCount = () => bo.locator('svg.ink [data-stroke]').count();
+const drawn = await inkCount();
+assert.ok(drawn >= 3);
+await ana.click('.draw-tools button:text-is("Clear")');
+await ana.waitForSelector('dialog.confirm[open]');
+await shot(ana, '07c-clear-confirm');
+await ana.click('dialog.confirm button:text-is("Cancel")');
+await ana.waitForSelector('dialog.confirm', { state: 'detached' });
+assert.equal(await inkCount(), drawn, 'Cancel keeps the drawings');
+await ana.click('.draw-tools button:text-is("Clear")');
+await ana.click('dialog.confirm button.danger');
+await bo.waitForFunction(() => !document.querySelector('svg.ink [data-stroke]'));
+await ana.click('.toast button:text-is("Undo")');
+await bo.waitForFunction((n) => document.querySelectorAll('svg.ink [data-stroke]').length === n, drawn);
+
 // ---- Images: hidden upload, set as map, spotlight, put on table ---------------------------------
 await ana.keyboard.press('Escape'); // back to the Move tool
 await ana.click('.drawer-tab');
@@ -312,7 +328,23 @@ await bo.waitForFunction(() => {
   return cx > v.x && cx < v.x + v.width && cy > v.y && cy < v.y + v.height;
 }, null, { timeout: 5000 });
 assert.ok(Number.parseInt(await bo.locator('img.map').evaluate((e) => (e as HTMLElement).style.left), 10) > 0, 'map is placed away from the corner');
+assert.ok(Number.parseInt(await bo.locator('img.map').evaluate((e) => (e as HTMLElement).style.top), 10) >= 400, 'map keeps a margin above it');
 await shot(bo, '08a-map-centered');
+
+// Right-click the map: size it like a card, then Center puts it back in the middle (with margin).
+const mapBox = (await ana.locator('img.map').boundingBox())!;
+await ana.mouse.click(mapBox.x + mapBox.width / 2, mapBox.y + mapBox.height / 2, { button: 'right' });
+await ana.waitForSelector('.menu .menu-heading:has-text("Map:")');
+await ana.fill('.menu .size-row input.pct', '400');
+await ana.press('.menu .size-row input.pct', 'Enter');
+await bo.waitForFunction(() => (document.querySelector('.map-controls input.pct') as HTMLInputElement)?.value === '400');
+await ana.click('.map-controls button:text-is("Center")');
+await bo.waitForFunction(() => {
+  const m = document.querySelector('img.map') as HTMLImageElement;
+  const w = m.naturalWidth * 4;
+  return Number.parseInt(m.style.left, 10) === Math.round(Math.max(400, (3200 - w) / 2));
+});
+await shot(bo, '08b-map-big-centered');
 
 // Map size: typed %; the controls hide from players once someone holds the GM seat.
 await ana.fill('.map-controls input.pct', '50');
@@ -341,6 +373,52 @@ await ana.click('.drawer-tab'); // the tab closes the drawer too
 await ana.waitForSelector('.drawer', { state: 'hidden' });
 await shot(ana, '09-map-and-handout');
 
+// Layers: the handout (newest) is on top; send it to the back, then bring the card to the front.
+const pieceIds = await ana.locator('.table-surface .piece').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.piece!));
+const handout = pieceIds[pieceIds.length - 1];
+const zOf = (p: Page, id: string) => p.locator(`.table-surface .piece[data-piece="${id}"]`).evaluate((e) => Number((e as HTMLElement).style.zIndex));
+const topBefore = await zOf(bo, handout);
+/** Where to point at a table piece: scroll it into the (short) table view, then the middle of its
+ *  part that's visible below the drawing toolbar. */
+async function piecePoint(p: Page, id: string) {
+  const el = p.locator(`.table-surface .piece[data-piece="${id}"]`);
+  await el.evaluate((e) => e.scrollIntoView({ block: 'center', inline: 'center' }));
+  const b = (await el.boundingBox())!;
+  const v = (await p.locator('.table-wrap').boundingBox())!;
+  const tools = (await p.locator('.draw-tools').boundingBox())!;
+  const top = Math.max(b.y, v.y, tools.y + tools.height + 2);
+  const bottom = Math.min(b.y + b.height, v.y + v.height);
+  return { x: (Math.max(b.x, v.x) + Math.min(b.x + b.width, v.x + v.width)) / 2, y: (top + bottom) / 2 };
+}
+async function clickPiece(p: Page, id: string) {
+  const pt = await piecePoint(p, id);
+  await p.mouse.click(pt.x, pt.y);
+}
+await clickPiece(ana, handout);
+await ana.click('.menu .menu-item:text-is("Send to back")');
+await bo.waitForFunction(([id, top]) => Number((document.querySelector(`.table-surface .piece[data-piece="${id}"]`) as HTMLElement).style.zIndex) < Number(top), [handout, String(topBefore)] as const);
+
+// Lock: Bo can't drag a locked card; Ana unlocks it.
+const card0 = pieceIds[0];
+const lockEl = (p: Page) => p.locator(`.table-surface .piece[data-piece="${card0}"]`);
+await clickPiece(ana, card0);
+await ana.click('.menu .menu-item:text-is("Lock in place")');
+await bo.waitForSelector(`.table-surface .piece.locked[data-piece="${card0}"] .badge.locked`);
+const lb0 = await piecePoint(bo, card0);
+const left0 = await lockEl(bo).evaluate((e) => (e as HTMLElement).style.left);
+await bo.mouse.move(lb0.x, lb0.y);
+await bo.mouse.down();
+await bo.mouse.move(lb0.x + 200, lb0.y + 150, { steps: 10 });
+assert.equal(await bo.locator('.piece.ghost').count(), 0, 'no drag for a locked card');
+await bo.mouse.up();
+await bo.waitForSelector('.menu .menu-item:text-is("Unlock")'); // a click still opens its menu
+await shot(bo, '09b-locked-menu');
+await bo.keyboard.press('Escape');
+assert.equal(await lockEl(bo).evaluate((e) => (e as HTMLElement).style.left), left0);
+await clickPiece(ana, card0);
+await ana.click('.menu .menu-item:text-is("Unlock")');
+await bo.waitForSelector(`.table-surface .piece[data-piece="${card0}"]:not(.locked)`);
+
 // The Sheets tab collapses and reopens the sheet dock.
 await ana.click('.dock-handle');
 await ana.waitForSelector('.dock-body', { state: 'detached' });
@@ -351,6 +429,9 @@ await ana.waitForSelector('.dock-body');
 await bo.fill('#roll-form input', '2d6+1');
 await bo.click('#roll-form button');
 await untilLog(ana, 'rolled 2d6+1');
+// ...and the result pops up on Bo's video tile for everyone.
+await ana.waitForSelector('.tile .roll-bubble b');
+await shot(ana, '09c-roll-on-tile');
 
 // The Cards tab slides the deck/row bar closed and open.
 await ana.click('.bar-handle');

@@ -56,6 +56,19 @@ test('scale and owner reverse even when they were unset', () => {
   assert.throws(() => apply(s, { kind: 'piece.update', id: 'p1', set: { scale: 100 } }), OpError);
 });
 
+test('a locked piece stays put until unlocked', () => {
+  const s = room();
+  apply(s, { kind: 'piece.update', id: 'p1', set: { zone: 'board', x: 10, y: 20 } });
+  roundTrip(s, { kind: 'piece.update', id: 'p1', set: { locked: true } });
+  apply(s, { kind: 'piece.update', id: 'p1', set: { locked: true } });
+  assert.throws(() => apply(s, { kind: 'piece.update', id: 'p1', set: { x: 50 } }), /locked/);
+  assert.throws(() => apply(s, { kind: 'piece.update', id: 'p1', set: { zone: 'row' } }), /locked/);
+  apply(s, { kind: 'piece.update', id: 'p1', set: { tapped: true, x: 10 } }); // other changes, same spot: fine
+  apply(s, { kind: 'piece.update', id: 'p1', set: { locked: false, x: 50 } });
+  assert.equal(s.pieces.p1.x, 50);
+  assert.equal(s.pieces.p1.locked, undefined);
+});
+
 test('publicNames only names face-up, unhidden cards', () => {
   const s = room();
   apply(s, { kind: 'card.create', card: { id: 'c1', name: 'One', front: '/assets/r/1.png' } });

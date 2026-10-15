@@ -3,7 +3,7 @@
 // drawn it streams to everyone over the A/V data channel so they see it appear live. Pings (a quick
 // "look here" marker) are live-only.
 import type { Op, RoomState, Stroke, StrokeShape } from '../../shared/model.ts';
-import { h, shortId } from './dom';
+import { h, shortId, toast } from './dom';
 
 export interface DrawCtx {
   me(): string;
@@ -186,17 +186,46 @@ export function createDrawing(surface: HTMLElement, area: HTMLElement, ctx: Draw
     if (t) setTool(t);
   });
 
+  /** Ask what to clear: everything, only your own drawings, or nothing. */
+  function askClear(all: number, mine: number): Promise<'all' | 'mine' | null> {
+    return new Promise((resolve) => {
+      let choice: 'all' | 'mine' | null = null;
+      const pick = (c: 'all' | 'mine') => () => { choice = c; dialog.close(); };
+      const dialog = h('dialog.modal.confirm', { onclose: () => { dialog.remove(); resolve(choice); } },
+        h('h3', {}, 'Clear drawings?'),
+        h('p', {}, all === mine
+          ? `This removes all ${all} drawing${all === 1 ? '' : 's'} on the table.`
+          : `There are ${all} drawings on the table; ${mine} of them are yours.`),
+        h('div.dialog-buttons', {},
+          h('button', { type: 'button', onclick: () => dialog.close() }, 'Cancel'),
+          all !== mine && mine > 0 && h('button', { type: 'button', onclick: pick('mine') }, `Clear my ${mine}`),
+          h('button.danger', { type: 'button', onclick: pick('all') }, all === mine ? 'Clear' : `Clear all ${all}`)));
+      document.body.append(dialog);
+      dialog.showModal();
+      (dialog.querySelector('button') as HTMLButtonElement).focus(); // Cancel is the default
+    });
+  }
+
   async function clear() {
     const state = ctx.state();
     const strokes = Object.values(state?.strokes ?? {});
     if (!strokes.length) return;
     const mine = strokes.filter((k) => k.by === ctx.me());
-    const all = mine.length === strokes.length || confirm(`Clear ALL ${strokes.length} drawings? (Cancel clears only your ${mine.length}.)`);
-    const doomed = all ? strokes : mine;
-    if (!doomed.length) return;
+    const choice = await askClear(strokes.length, mine.length);
+    if (!choice) return;
+    const doomed = choice === 'all' ? strokes : mine;
+    let batches = 0;
     for (let i = 0; i < doomed.length; i += 150) {
-      await ctx.act({ kind: 'batch', ops: doomed.slice(i, i + 150).map((k) => ({ kind: 'stroke.delete', id: k.id }) as Op) });
+      if (await ctx.act({ kind: 'batch', ops: doomed.slice(i, i + 150).map((k) => ({ kind: 'stroke.delete', id: k.id }) as Op) })) batches++;
     }
+    if (!batches) return;
+    // Each batch is one undo step; Undo here takes them all back.
+    toast(`Cleared ${doomed.length} drawing${doomed.length === 1 ? '' : 's'}.`, {
+      label: 'Undo',
+      run: async () => {
+        for (let i = 0; i < batches; i++) if (!(await ctx.act({ kind: 'undo' }))) break;
+      },
+    }, 12000);
   }
 
   // ---- Input ----------------------------------------------------------------------------------

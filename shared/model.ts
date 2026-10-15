@@ -71,6 +71,8 @@ export interface Piece {
   owner?: string;
   /** Size multiplier on the table (images, maps, tokens). Default 1. */
   scale?: number;
+  /** Pinned in place: it can't be moved (or sent elsewhere) until unlocked. Default false. */
+  locked?: boolean;
 }
 
 /** Fields a piece.update may change (everything except identity). */
