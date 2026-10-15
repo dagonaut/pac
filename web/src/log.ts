@@ -111,11 +111,19 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
   }
 }
 
+/** Player name -> color, for names in the log (guests have none). */
+let nameColors = new Map<string, string>();
+export function setNameColors(colors: Map<string, string>) {
+  nameColors = colors;
+  for (const b of logEl.querySelectorAll<HTMLElement>('li > b')) b.style.color = nameColors.get(b.textContent ?? '') ?? '';
+}
+
 export function addEntry(entry: LogEntry, state: RoomState, me: string) {
   const li = document.createElement('li');
   li.title = new Date(entry.ts).toLocaleString();
   const who = document.createElement('b');
   who.textContent = entry.by;
+  who.style.color = nameColors.get(entry.by) ?? '';
   li.append(who);
   const op = entry.op;
   if (op.kind === 'chat') {

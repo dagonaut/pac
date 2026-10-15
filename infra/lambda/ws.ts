@@ -10,7 +10,7 @@ import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { APIGatewayProxyResultV2, APIGatewayProxyWebsocketEventV2 } from 'aws-lambda';
-import { apply, OpError, publicNames, resolve } from '../../shared/engine.ts';
+import { apply, forbidden, OpError, publicNames, resolve } from '../../shared/engine.ts';
 import type { LogEntry, Op, RoomState } from '../../shared/model.ts';
 import { CHUNK_CHARS, type ClientMessage, type ServerMessage } from '../../shared/protocol.ts';
 import { connSk, ddb, GAME_TABLE, loadState, logSk, MAX_STATE_CHARS, roomPk, stateItem, verifySession } from './common.ts';
@@ -112,11 +112,13 @@ async function findUndo(room: string, name: string): Promise<{ target: number; o
 }
 
 /** Resolve + apply + store one op, retrying if someone else's op landed first. */
-async function commit(room: string, name: string, op: Op, cid: string): Promise<LogEntry> {
+async function commit(room: string, name: string, canGm: boolean, op: Op, cid: string): Promise<LogEntry> {
   const rand = (sides: number) => randomInt(1, sides + 1);
   for (let attempt = 0; ; attempt++) {
     const current = await loadState(room);
     if (!current) throw new OpError('This room no longer exists.');
+    const no = forbidden(current, op, name, canGm);
+    if (no) throw new OpError(no);
     const undo = op.kind === 'undo' ? await findUndo(room, name) : undefined;
 
     const next: RoomState = structuredClone(current);
@@ -199,7 +201,7 @@ export async function handler(event: WsEvent): Promise<APIGatewayProxyResultV2> 
     const claims = await verifySession(event.queryStringParameters?.token);
     if (!claims) return { statusCode: 401 };
     const ttl = Math.floor(Date.now() / 1000) + CONN_TTL_HOURS * 3600;
-    await ddb.send(new PutCommand({ TableName: GAME_TABLE, Item: { pk: `conn#${connectionId}`, sk: 'conn', room: claims.room, name: claims.name, exp: claims.exp, ttl } }));
+    await ddb.send(new PutCommand({ TableName: GAME_TABLE, Item: { pk: `conn#${connectionId}`, sk: 'conn', room: claims.room, name: claims.name, gm: !!claims.gm, exp: claims.exp, ttl } }));
     await ddb.send(new PutCommand({ TableName: GAME_TABLE, Item: { pk: roomPk(claims.room), sk: connSk(connectionId), name: claims.name, ttl } }));
     return ok;
   }
@@ -217,6 +219,7 @@ export async function handler(event: WsEvent): Promise<APIGatewayProxyResultV2> 
   }
   const room = conn.room as string;
   const name = conn.name as string;
+  const canGm = conn.gm === true;
 
   let msg: ClientMessage;
   try {
@@ -240,7 +243,7 @@ export async function handler(event: WsEvent): Promise<APIGatewayProxyResultV2> 
     case 'op':
       try {
         if (!msg.op || typeof msg.op !== 'object') throw new OpError('Missing op.');
-        const entry = await commit(room, name, msg.op, String(msg.cid ?? '').slice(0, 40));
+        const entry = await commit(room, name, canGm, msg.op, String(msg.cid ?? '').slice(0, 40));
         await broadcast(event, room, { type: 'op', entry });
       } catch (e) {
         if (!(e instanceof OpError)) console.error(e);

@@ -523,6 +523,31 @@ export function apply(state: RoomState, op: Op): Op | null {
   }
 }
 
+/** Ops only the GM may make while someone holds the GM seat (anyone may while it's empty):
+ *  changing the table's map and hiding/revealing cards. The server checks this per sender. */
+export function gmOnly(op: Op): boolean {
+  switch (op.kind) {
+    case 'zone.map': return true;
+    case 'piece.update': return !!op.set && typeof op.set === 'object' && op.set.visibleTo !== undefined;
+    case 'batch': return Array.isArray(op.ops) && op.ops.some(gmOnly);
+    default: return false;
+  }
+}
+
+/** Why `name` may not send `op` in this room, or null if they may. `canGm`: they're a player
+ *  flagged GM (guests and other players can't take the seat). */
+export function forbidden(state: RoomState, op: Op, name: string, canGm: boolean): string | null {
+  if (op.kind === 'gm') {
+    // Taking the seat is for GM players (and only for yourself); leaving it is for the holder,
+    // or another GM player clearing a seat someone left behind.
+    if (op.seat === null) return state.gm === name || canGm ? null : 'Only the GM can leave the GM seat.';
+    if (op.seat !== name) return 'You can only take the GM seat for yourself.';
+    return canGm ? null : 'Only players marked GM can take the GM seat. (Ask an admin.)';
+  }
+  if (state.gm && state.gm !== name && gmOnly(op)) return `Only the GM (${state.gm}) can do that.`;
+  return null;
+}
+
 /** Piece ids an op touches. */
 function touched(op: Op): string[] {
   switch (op.kind) {

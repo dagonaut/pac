@@ -1,10 +1,13 @@
-// HTTP API, all gated by the shared table key:
-//   POST /api/rooms        { key }                         -> { rooms }
-//   POST /api/rooms/create { key, name, system, setup }    -> { room }
-//   POST /api/rooms/archive { key, room, archived }        -> { ok }
-//   POST /api/join         { key, room, name }             -> { meeting, attendee, token, wsUrl, name, room }
-// and, gated by the session token from /api/join instead:
+// HTTP API. Each call carries a player's link credential ({ player: "<id>.<secret>" }) or, for
+// guests, the shared table key ({ key }); shown as AUTH below.
+//   POST /api/rooms        { AUTH }                        -> { rooms }
+//   POST /api/rooms/create { AUTH, name, system, setup }   -> { room }
+//   POST /api/rooms/archive { AUTH, room, archived }       -> { ok }
+//   POST /api/join         { AUTH, room, name? }           -> { meeting, attendee, token, wsUrl, name, room }
+//   POST /api/players/<action>                             -> see players.ts
+// and, gated by the session token from /api/join instead (or a player credential, for portraits):
 //   POST /api/assets       { token, files: [{name, type, size}] } -> { uploads: [{url, fields, path}] }
+//   POST /api/assets       { player, purpose: 'portrait', files: [one] }
 import {
   ChimeSDKMeetingsClient,
   CreateAttendeeCommand,
@@ -23,8 +26,9 @@ import { apply, OpError, resolve } from '../../shared/engine.ts';
 import { emptyRoom, type Op } from '../../shared/model.ts';
 import type { RoomSummary } from '../../shared/protocol.ts';
 import {
-  cleanName, ddb, GAME_TABLE, json, keyMatches, loadState, signSession, STATE_SK, stateItem, verifySession,
+  cleanName, ddb, GAME_TABLE, json, loadState, signSession, STATE_SK, stateItem, verifySession,
 } from './common.ts';
+import { AuthError, authenticate, type Caller, guestNameAllowed, playerFrom, playersRoute } from './players.ts';
 
 // Chime's meeting API lives in a "control" region; the media itself runs in MEDIA_REGION.
 const chime = new ChimeSDKMeetingsClient({ region: process.env.CHIME_CONTROL_REGION });
@@ -42,11 +46,8 @@ const IMAGE_TYPES: Record<string, string> = {
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_FILES = 200;
 
-class HttpError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message);
-  }
-}
+// Same shape as AuthError, so both turn into an HTTP status the same way.
+class HttpError extends AuthError {}
 
 // ---- Chime meetings -------------------------------------------------------------------------
 
@@ -167,11 +168,16 @@ async function archiveRoom(body: Record<string, unknown>) {
   return { ok: true };
 }
 
-async function join(body: Record<string, unknown>) {
+async function join(body: Record<string, unknown>, caller: Caller) {
   const room = String(body.room ?? '').trim().toLowerCase();
-  const name = cleanName(body.name);
+  // Players are who their link says; guests type a name, which mustn't be a player's.
+  const player = 'player' in caller ? caller.player : undefined;
+  const name = player ? player.name : cleanName(body.name);
   if (!/^[a-z0-9-]{1,40}$/.test(room)) throw new HttpError(400, 'Room must be 1–40 letters, numbers or dashes.');
   if (!name) throw new HttpError(400, 'Enter a name.');
+  if (!player && !(await guestNameAllowed(name))) {
+    throw new HttpError(409, `${name} is a player here. Players sign in with their own link; as a guest, pick another name.`);
+  }
   const state = await loadState(room);
   if (!state) throw new HttpError(404, `There's no room "${room}". Create it from the room list.`);
 
@@ -186,7 +192,9 @@ async function join(body: Record<string, unknown>) {
     )
   ).Attendee;
 
-  const token = await signSession({ room, name, exp: Math.floor(Date.now() / 1000) + SESSION_HOURS * 3600 });
+  const token = await signSession({
+    room, name, exp: Math.floor(Date.now() / 1000) + SESSION_HOURS * 3600, ...(player ? { pid: player.id, gm: player.gm } : {}),
+  });
   return {
     meeting,
     attendee,
@@ -199,10 +207,21 @@ async function join(body: Record<string, unknown>) {
 
 /** Presigned S3 POSTs for card art. Files land under assets/<room>/ with random names. */
 async function uploadUrls(body: Record<string, unknown>) {
-  const claims = await verifySession(String(body.token ?? ''));
-  if (!claims) throw new HttpError(401, 'Session expired. Rejoin the room.');
+  // A player's portrait goes under their own folder; everything else belongs to a room.
+  let folder: string;
+  let max = MAX_FILES;
+  if (body.purpose === 'portrait') {
+    const player = await playerFrom(body.player);
+    if (!player) throw new HttpError(403, 'That player link is no longer valid.');
+    folder = `players/${player.id}`;
+    max = 1;
+  } else {
+    const claims = await verifySession(String(body.token ?? ''));
+    if (!claims) throw new HttpError(401, 'Session expired. Rejoin the room.');
+    folder = claims.room;
+  }
   const files = Array.isArray(body.files) ? body.files : [];
-  if (!files.length || files.length > MAX_FILES) throw new HttpError(400, `Upload 1–${MAX_FILES} images at a time.`);
+  if (!files.length || files.length > max) throw new HttpError(400, `Upload 1–${max} images at a time.`);
 
   const uploads = await Promise.all(
     files.map(async (f: { name?: unknown; type?: unknown; size?: unknown }) => {
@@ -210,7 +229,7 @@ async function uploadUrls(body: Record<string, unknown>) {
       const ext = IMAGE_TYPES[type];
       if (!ext) throw new HttpError(400, `"${String(f.name)}" isn't a PNG, JPEG, WebP, GIF or AVIF image.`);
       if (Number(f.size) > MAX_IMAGE_BYTES) throw new HttpError(400, `"${String(f.name)}" is over 8 MB.`);
-      const key = `assets/${claims.room}/${randomUUID()}.${ext}`;
+      const key = `assets/${folder}/${randomUUID()}.${ext}`;
       const { url, fields } = await createPresignedPost(s3, {
         Bucket: ASSETS_BUCKET,
         Key: key,
@@ -235,16 +254,19 @@ export async function handler(event: APIGatewayProxyEventV2): Promise<APIGateway
 
   try {
     if (event.routeKey === 'POST /api/assets') return json(200, await uploadUrls(body));
-    if (!(await keyMatches(body.key))) return json(403, { error: 'Wrong table key.' });
+    if (event.routeKey.startsWith('POST /api/players/')) {
+      return json(200, await playersRoute(event.routeKey.slice('POST /api/players/'.length), body));
+    }
+    const caller = await authenticate(body);
     switch (event.routeKey) {
       case 'POST /api/rooms': return json(200, await listRooms());
       case 'POST /api/rooms/create': return json(200, await createRoom(body));
       case 'POST /api/rooms/archive': return json(200, await archiveRoom(body));
-      case 'POST /api/join': return json(200, await join(body));
+      case 'POST /api/join': return json(200, await join(body, caller));
       default: return json(404, { error: 'Not found.' });
     }
   } catch (e) {
-    if (e instanceof HttpError) return json(e.status, { error: e.message });
+    if (e instanceof AuthError) return json(e.status, { error: e.message });
     console.error(e);
     return json(500, { error: 'Server error.' });
   }

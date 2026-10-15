@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { describeRoll, roll } from './dice.ts';
-import { apply, newPiece, OpError, publicNames, resolve } from './engine.ts';
+import { apply, forbidden, newPiece, OpError, publicNames, resolve } from './engine.ts';
 import { emptyRoom, type Op, type RoomState } from './model.ts';
 import { defaultValues, type SheetTemplateFile, slotLabels, templateErrors } from './sheet.ts';
 
@@ -67,6 +67,28 @@ test('a locked piece stays put until unlocked', () => {
   apply(s, { kind: 'piece.update', id: 'p1', set: { locked: false, x: 50 } });
   assert.equal(s.pieces.p1.x, 50);
   assert.equal(s.pieces.p1.locked, undefined);
+});
+
+test('GM seat and GM-only ops', () => {
+  const s = room();
+  const map: Op = { kind: 'zone.map', id: 'board', map: null };
+  const hide: Op = { kind: 'piece.update', id: 'p1', set: { visibleTo: 'gm' } };
+  // Taking the seat: GM players only, and only for themselves.
+  assert.equal(forbidden(s, { kind: 'gm', seat: 'Sam' }, 'Sam', true), null);
+  assert.match(forbidden(s, { kind: 'gm', seat: 'Sam' }, 'Sam', false)!, /marked GM/);
+  assert.match(forbidden(s, { kind: 'gm', seat: 'Ana' }, 'Sam', true)!, /yourself/);
+  // Nobody seated: anyone may change the map or hide cards.
+  assert.equal(forbidden(s, map, 'Bo', false), null);
+  assert.equal(forbidden(s, hide, 'Bo', false), null);
+  s.gm = 'Sam';
+  assert.match(forbidden(s, map, 'Bo', false)!, /Only the GM \(Sam\)/);
+  assert.match(forbidden(s, { kind: 'batch', ops: [{ kind: 'chat', text: 'x' }, hide] }, 'Bo', false)!, /Only the GM/);
+  assert.equal(forbidden(s, map, 'Sam', true), null);
+  assert.equal(forbidden(s, { kind: 'piece.update', id: 'p1', set: { tapped: true } }, 'Bo', false), null);
+  // Leaving: the holder, or another GM player clearing it.
+  assert.equal(forbidden(s, { kind: 'gm', seat: null }, 'Sam', false), null);
+  assert.equal(forbidden(s, { kind: 'gm', seat: null }, 'Paul', true), null);
+  assert.match(forbidden(s, { kind: 'gm', seat: null }, 'Bo', false)!, /leave/);
 });
 
 test('publicNames only names face-up, unhidden cards', () => {

@@ -172,3 +172,17 @@ export function createImporter(ctx: ImportCtx) {
     }
   };
 }
+
+/** Upload a player's own portrait (outside any room) and return its /assets/players/... path. */
+export async function uploadPortrait(player: string, file: File): Promise<string> {
+  if (!TYPES.includes(file.type)) throw new Error(`${file.name} isn't a PNG, JPEG, WebP, GIF or AVIF image.`);
+  const res = await fetch('/api/assets', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ player, purpose: 'portrait', files: [{ name: file.name, type: file.type, size: file.size }] }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? `Upload request failed (${res.status}).`);
+  await uploadOne(file, data.uploads[0]);
+  return data.uploads[0].path;
+}

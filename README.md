@@ -3,6 +3,7 @@
 A homebrew virtual tabletop for our online TTRPG group: live audio/video plus customizable, plugin-style game tools (dice, card-based sheets, shared images, maps).
 
 Prototype, usable at the table:
+- **Players** sign in with a personal link (no passwords); admins manage the list and who may GM. Guests can still join with the shared table key. Each player has a color and a portrait.
 - **Rooms** that persist between sessions, each tied to one game system. They can be archived from the lobby.
 - **Audio/video**: a strip of video tiles. Everyone's dice results pop up on their tile.
 - **Cards**: bulk-import card images. Decks with random server-side draws, face-up rows, discard piles. Drag cards anywhere. Flip, tap, upgrade (with optional upgraded art), counters, notes, and a GM seat that can hide cards. A card library for adding copies.

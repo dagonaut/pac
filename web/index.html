@@ -8,13 +8,28 @@
   </head>
   <body>
     <main id="lobby">
-      <form id="who" class="card">
+      <section id="who-card" class="card">
         <h1>PAC VTT</h1>
-        <label>Your name <input name="name" required maxlength="40" autocomplete="nickname" /></label>
-        <label>Table key <input name="key" type="password" required autocomplete="current-password" /></label>
-        <label class="check"><input type="checkbox" name="camera" checked /> Camera on</label>
-        <button type="submit">Show rooms</button>
-      </form>
+        <div id="me" hidden>
+          <div class="me-row">
+            <span id="me-face" class="face"></span>
+            <div><small class="muted">Signed in as</small><strong id="me-name"></strong></div>
+          </div>
+          <div class="me-actions">
+            <button type="button" id="profile-btn">Profile</button>
+            <button type="button" id="players-btn" hidden>Players</button>
+            <button type="button" id="sign-out">Sign out</button>
+          </div>
+        </div>
+        <form id="who">
+          <p class="muted hint">Players: open your personal link to sign in. Or join as a guest:</p>
+          <label>Your name <input name="name" required maxlength="40" autocomplete="nickname" /></label>
+          <label>Table key <input name="key" type="password" required autocomplete="current-password" /></label>
+          <button type="submit">Show rooms</button>
+          <button type="button" id="setup-btn" class="link-btn" hidden>First time? Set up players and make yourself the admin</button>
+        </form>
+        <label class="check"><input type="checkbox" id="camera-on" checked /> Camera on</label>
+      </section>
 
       <section id="rooms" class="card" hidden>
         <h2>Rooms</h2>
