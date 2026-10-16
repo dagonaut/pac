@@ -5,7 +5,36 @@ export type ClientMessage =
   /** Sent after connecting (and reconnecting): asks for a full snapshot. */
   | { type: 'hello' }
   | { type: 'op'; cid: string; op: Op }
-  | { type: 'ping' };
+  | { type: 'ping' }
+  /** Campaign notes (stored outside the room state): list every page... */
+  | { type: 'notes' }
+  /** ...create or change one (only while nobody else holds its editing lock; `lock` takes or
+   *  renews it), or take/release the lock without changing the page. */
+  | { type: 'note.save'; cid: string; page: NoteChange; lock?: boolean }
+  | { type: 'note.lock'; cid: string; id: string; lock: boolean };
+
+/** A page of the room's shared notes. */
+export interface NotePage {
+  id: string;
+  title: string;
+  body: string;
+  created: string;
+  createdBy: string;
+  updated: string;
+  updatedBy: string;
+  /** Who is typing in it, until `editorUntil` (server ms). Others can't save meanwhile. */
+  editor?: string;
+  editorUntil?: number;
+  /** In the "Deleted pages" list (restorable). */
+  deleted?: boolean;
+}
+
+export type NoteChange = Pick<NotePage, 'id'> & Partial<Pick<NotePage, 'title' | 'body' | 'deleted'>>;
+
+export const NOTE_TITLE_MAX = 120;
+export const NOTE_BODY_MAX = 20_000;
+/** How long an editing lock lasts without being renewed (ms). */
+export const NOTE_LOCK_MS = 30_000;
 
 export type ServerMessage =
   /** Full state plus recent log, for joining or catching up after a reconnect. */
@@ -16,6 +45,10 @@ export type ServerMessage =
   | { type: 'error'; cid?: string; message: string }
   /** `now`: the server's clock (ms), so browsers can play music in sync. */
   | { type: 'pong'; now?: number }
+  /** Every notes page (reply to `notes`). */
+  | { type: 'notes'; pages: NotePage[] }
+  /** A page that changed (broadcast to the room; `cid` echoes the sender's request). */
+  | { type: 'note'; page: NotePage; cid?: string }
   /** Piece `i` of `n` of a message too big for one WebSocket frame (API Gateway caps them at 128 KB).
    *  Join the `data` strings in order and parse the result as a ServerMessage. */
   | { type: 'chunk'; id: string; i: number; n: number; data: string };

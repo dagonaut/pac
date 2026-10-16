@@ -2,7 +2,7 @@
 // server by applying the ops it broadcasts, with the same engine the server uses.
 import { apply } from '../../shared/engine.ts';
 import type { LogEntry, Op, RoomState } from '../../shared/model.ts';
-import { type ClientMessage, MAX_CLIENT_MESSAGE, type ServerMessage } from '../../shared/protocol.ts';
+import { type ClientMessage, MAX_CLIENT_MESSAGE, type NoteChange, type NotePage, type ServerMessage } from '../../shared/protocol.ts';
 
 export interface GameEvents {
   /** Fresh full state (first connect, reconnect, or after a gap). Re-render everything. */
@@ -13,6 +13,9 @@ export interface GameEvents {
   status(connected: boolean): void;
   /** Server messages not tied to an op of ours (e.g. session expired). */
   error(message: string): void;
+  /** Campaign notes: the full list, or one page that changed. */
+  notes?(pages: NotePage[]): void;
+  note?(page: NotePage): void;
 }
 
 const PING_MS = 5 * 60_000; // API Gateway drops idle sockets after 10 minutes
@@ -29,6 +32,10 @@ export class GameClient {
   private ping: ReturnType<typeof setInterval> | undefined;
   private buffered: LogEntry[] = [];
   private pending = new Map<string, { resolve(e: LogEntry): void; reject(err: Error): void }>();
+  private pendingNotes = new Map<string, { resolve(p: NotePage): void; reject(err: Error): void }>();
+  /** Note requests go one at a time: each WebSocket message runs in its own Lambda, so a "save"
+   *  sent just before a "release the lock" could otherwise land after it and re-take the lock. */
+  private noteChain: Promise<unknown> = Promise.resolve();
   private chunks = new Map<string, string[]>();
 
   constructor(private url: string, private token: string, private events: GameEvents) {
@@ -43,6 +50,37 @@ export class GameClient {
       const msg = JSON.stringify({ type: 'op', cid, op } satisfies ClientMessage);
       if (new Blob([msg]).size > MAX_CLIENT_MESSAGE) return reject(new Error('That action is too big to send; try fewer cards at once.'));
       this.pending.set(cid, { resolve, reject });
+      this.ws.send(msg);
+    });
+  }
+
+  /** Ask for every notes page (arrives through events.notes). */
+  loadNotes() {
+    this.post({ type: 'notes' });
+  }
+
+  /** Save a page (and/or take, renew or release its editing lock). Resolves with the stored page. */
+  saveNote(page: NoteChange, lock?: boolean): Promise<NotePage> {
+    return this.noteRequest((cid) => ({ type: 'note.save', cid, page, ...(lock !== undefined ? { lock } : {}) }));
+  }
+
+  lockNote(id: string, lock: boolean): Promise<NotePage> {
+    return this.noteRequest((cid) => ({ type: 'note.lock', cid, id, lock }));
+  }
+
+  private noteRequest(make: (cid: string) => ClientMessage): Promise<NotePage> {
+    const next = this.noteChain.catch(() => {}).then(() => this.sendNote(make));
+    this.noteChain = next;
+    return next;
+  }
+
+  private sendNote(make: (cid: string) => ClientMessage): Promise<NotePage> {
+    const cid = crypto.randomUUID();
+    return new Promise((resolve, reject) => {
+      if (this.ws?.readyState !== WebSocket.OPEN) return reject(new Error('Not connected; try again in a moment.'));
+      const msg = JSON.stringify(make(cid));
+      if (new Blob([msg]).size > MAX_CLIENT_MESSAGE) return reject(new Error('That page is too long to send. Split it into a new page.'));
+      this.pendingNotes.set(cid, { resolve, reject });
       this.ws.send(msg);
     });
   }
@@ -82,8 +120,9 @@ export class GameClient {
       clearInterval(this.ping);
       this.chunks.clear();
       this.events.status(false);
-      for (const p of this.pending.values()) p.reject(new Error('Connection lost; try again.'));
+      for (const p of [...this.pending.values(), ...this.pendingNotes.values()]) p.reject(new Error('Connection lost; try again.'));
       this.pending.clear();
+      this.pendingNotes.clear();
       if (this.closed) return;
       // API Gateway closes sockets after 2 hours, and networks blip: reconnect with backoff.
       // A socket that never opens (rather than one that drops) usually means the session
@@ -129,10 +168,23 @@ export class GameClient {
         if (!this.state) this.buffered.push(msg.entry);
         else this.applyEntry(msg.entry);
         break;
+      case 'notes':
+        this.events.notes?.(msg.pages);
+        break;
+      case 'note': {
+        this.events.note?.(msg.page);
+        const p = msg.cid ? this.pendingNotes.get(msg.cid) : undefined;
+        if (p) {
+          this.pendingNotes.delete(msg.cid!);
+          p.resolve(msg.page);
+        }
+        break;
+      }
       case 'error': {
-        const p = msg.cid ? this.pending.get(msg.cid) : undefined;
+        const p = msg.cid ? this.pending.get(msg.cid) ?? this.pendingNotes.get(msg.cid) : undefined;
         if (p) {
           this.pending.delete(msg.cid!);
+          this.pendingNotes.delete(msg.cid!);
           p.reject(new Error(msg.message));
         } else {
           this.events.error(msg.message);

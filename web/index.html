@@ -60,10 +60,25 @@
       <section id="board">
         <p class="placeholder">The shared table goes here (cards, maps, drawing).</p>
       </section>
-      <button id="side-tab" type="button" title="Hide chat and dice">Chat &amp; dice</button>
+      <button id="side-tab" type="button" title="Hide chat and notes">Chat &amp; notes</button>
       <aside id="side">
         <p id="conn-status" hidden>Reconnecting…</p>
-        <ol id="log"></ol>
+        <div class="side-tabs" role="tablist">
+          <button type="button" role="tab" data-pane="chat" class="active">Chat</button>
+          <button type="button" role="tab" data-pane="notes">Notes</button>
+        </div>
+        <div id="chat-pane" class="side-pane">
+          <ol id="log"></ol>
+          <form id="chat-form" class="inline">
+            <input name="text" placeholder="Say something…" autocomplete="off" maxlength="500" />
+            <button type="submit">Send</button>
+          </form>
+          <button id="undo-btn" type="button" title="Undo your last action">Undo</button>
+        </div>
+        <div id="notes-pane" class="side-pane" hidden></div>
+      </aside>
+      <!-- Dice live in the top "Dice & Cards" pane (moved there by the board). -->
+      <div id="dice-box">
         <div id="dice">
           <button type="button" data-expr="d4">d4</button>
           <button type="button" data-expr="d6">d6</button>
@@ -77,12 +92,7 @@
           <input name="expr" placeholder="2d6+3" autocomplete="off" maxlength="60" />
           <button type="submit">Roll</button>
         </form>
-        <form id="chat-form" class="inline">
-          <input name="text" placeholder="Say something…" autocomplete="off" maxlength="500" />
-          <button type="submit">Send</button>
-        </form>
-        <button id="undo-btn" type="button" title="Undo your last action">Undo</button>
-      </aside>
+      </div>
       <footer id="controls">
         <button id="mic-btn" type="button">Mute</button>
         <button id="cam-btn" type="button">Camera off</button>

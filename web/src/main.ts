@@ -13,6 +13,7 @@ import { addEntry, clearLog, note, resetLog, setNameColors } from './log';
 import { face, openPlayers, openProfile } from './players';
 import { createSound } from './sound';
 import { createLobby } from './lobby';
+import { createNotes } from './notes';
 import { cameraError, getPermissions, micError, pick, probeCamera } from './media';
 import { setupOps, systemName, systems } from './systems/index';
 
@@ -498,7 +499,23 @@ const board = createBoard($('#board'), {
   live: (data) => session?.send(data),
   token: () => token,
   openTemplates: () => templates.openLibrary(),
+  dice: $('#dice-box'),
 });
+
+// ---- Right pane: Chat and Notes tabs --------------------------------------------------------
+
+const notes = createNotes($('#notes-pane'), { me: () => me, game: () => game });
+let sidePane: 'chat' | 'notes' = prefs.get('sidePane') === 'notes' ? 'notes' : 'chat';
+function showPane(pane: 'chat' | 'notes') {
+  sidePane = pane;
+  prefs.set('sidePane', pane);
+  for (const b of document.querySelectorAll<HTMLElement>('.side-tabs button')) b.classList.toggle('active', b.dataset.pane === pane);
+  $('#chat-pane').hidden = pane !== 'chat';
+  $('#notes-pane').hidden = pane !== 'notes';
+  if (pane === 'notes' && game && !notes.loaded) notes.load();
+}
+for (const b of document.querySelectorAll<HTMLElement>('.side-tabs button')) b.addEventListener('click', () => showPane(b.dataset.pane as 'chat' | 'notes'));
+showPane(sidePane);
 
 $('#dice').addEventListener('click', (e) => {
   const expr = (e.target as HTMLElement).dataset.expr;
@@ -538,7 +555,7 @@ const sideTab = $<HTMLButtonElement>('#side-tab');
 let unread = 0;
 function setSide(collapsed: boolean) {
   roomView.classList.toggle('side-collapsed', collapsed);
-  sideTab.title = collapsed ? 'Show chat and dice' : 'Hide chat and dice';
+  sideTab.title = collapsed ? 'Show chat and notes' : 'Hide chat and notes';
   if (!collapsed) unread = 0;
   if (unread) sideTab.dataset.unread = String(unread);
   else delete sideTab.dataset.unread;
@@ -631,6 +648,7 @@ $('#copy-link').addEventListener('click', async (e) => {
 
 function leftRoom(reason: string) {
   sound.stop();
+  notes.reset();
   session = null;
   game?.close();
   game = null;
@@ -669,6 +687,8 @@ async function enterRoom(id: string, button: HTMLButtonElement): Promise<boolean
 
     game = new GameClient(join.wsUrl, join.token, {
       snapshot: (state, log) => {
+        // (Re)connected: the notes may have changed while we were away.
+        if (notes.loaded || sidePane === 'notes') notes.load();
         renderState(state);
         board.render(state);
         sound.render(state);
@@ -684,6 +704,8 @@ async function enterRoom(id: string, button: HTMLButtonElement): Promise<boolean
         showRoll(entry.by, entry.op);
       },
       status: (connected) => ($('#conn-status').hidden = connected),
+      notes: (pages) => notes.onPages(pages),
+      note: (page) => notes.onPage(page),
       error: (message) => note(message),
     });
 

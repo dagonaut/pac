@@ -2592,3 +2592,174 @@ button.track {
   font-size: 0.85rem;
   padding: 4px 6px;
 }
+
+/* ---- Right pane: Chat / Notes tabs ---- */
+.side-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #4a3f31;
+}
+
+.side-tabs button {
+  flex: 1;
+  border-radius: 6px 6px 0 0;
+  border-bottom: none;
+  background: transparent;
+  color: var(--muted-text);
+}
+
+.side-tabs button.active {
+  background: var(--panel-2);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.side-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.side-pane[hidden] {
+  display: none;
+}
+
+/* ---- Notes ---- */
+.notes-list-view,
+.notes-page-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notes-list-view[hidden],
+.notes-page-view[hidden] {
+  display: none;
+}
+
+.notes-head {
+  display: flex;
+  gap: 6px;
+}
+
+.notes-head input {
+  flex: 1;
+  min-width: 0;
+}
+
+.note-list {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+
+.note-item {
+  width: 100%;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 6px 8px;
+  background: var(--panel-2);
+}
+
+.note-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.note-snippet {
+  color: var(--muted-text);
+  overflow-wrap: anywhere;
+}
+
+.note-snippet mark,
+.note-body::selection {
+  background: var(--accent);
+  color: #1b150e;
+}
+
+.note-list li.deleted {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-text);
+  font-size: 0.85rem;
+  padding: 2px 8px;
+}
+
+.note-list li.deleted-toggle {
+  padding: 6px 0 0;
+}
+
+.note-title-input {
+  font-weight: 600;
+}
+
+.note-body {
+  flex: 1;
+  min-height: 8rem;
+  resize: none;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  padding: 8px;
+}
+
+.notes-page-view.locked .note-body {
+  border-color: var(--accent);
+  opacity: 0.9;
+}
+
+.note-status {
+  min-height: 1.2em;
+}
+
+.notes-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ---- Dice at the left of the Dice & Cards pane ---- */
+.bar-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  max-height: 40vh;
+  transition: max-height 0.2s ease, opacity 0.2s ease;
+}
+
+.bar-row .board-bar {
+  flex: 1;
+  min-width: 0;
+}
+
+.bar-pane.collapsed .bar-row {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+#dice-box {
+  flex: 0 0 220px;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+#dice-box #dice button {
+  flex: 1 0 2.6rem;
+}

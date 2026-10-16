@@ -582,7 +582,50 @@ try {
   })).json() as { here: string[]; waiting: string[] };
   assert.deepEqual([seen.here, seen.waiting], [['Ana', 'Bo'], []]);
 
-  // Chat & dice panel: hide it, get an unread count, show it again.
+  // ---- Campaign notes: Ana writes a page, Bo watches it update live, then edits it after her ------
+  await ana.click('.side-tabs button:text-is("Notes")');
+  await bo.click('.side-tabs button:text-is("Notes")');
+  await ana.waitForSelector('.note-list >> text=No pages yet');
+  ana.once('dialog', (d) => void d.accept('Session 1'));
+  await ana.click('.notes-head button:text-is("+ Page")');
+  await ana.waitForSelector('.notes-page-view:not([hidden]) .note-body');
+  await ana.click('.note-body');
+  await ana.waitForSelector('.note-status:text("Editing")');
+  await ana.keyboard.type('The glink glonk is weak to salt.');
+  await bo.waitForSelector('.note-list .note-item:has-text("Session 1") >> text=Ana is editing');
+  await bo.click('.note-item:has-text("Session 1")');
+  await bo.waitForFunction(() => (document.querySelector('.note-body') as HTMLTextAreaElement).value.includes('weak to salt'));
+  assert.ok(await bo.locator('.note-body').evaluate((e) => (e as HTMLTextAreaElement).readOnly), 'read-only while Ana edits');
+  await ana.keyboard.type(' Next: the lighthouse.');
+  await bo.waitForFunction(() => (document.querySelector('.note-body') as HTMLTextAreaElement).value.endsWith('the lighthouse.'));
+  await shot(bo, '12a-notes-live');
+  await ana.click('.notes-head button:text-is("← Pages")'); // done: releases the lock
+  await bo.waitForSelector('.note-status:text("Last edited by Ana")');
+  await bo.click('.note-body');
+  await bo.waitForSelector('.note-status:text("Editing")');
+  await bo.keyboard.press('Control+End');
+  await bo.keyboard.type(' Bo owes Ana a drink.');
+  await bo.click('.notes-head button:text-is("← Pages")');
+  // Ana searches and finds Bo's line.
+  await ana.fill('.notes-head input[type=search]', 'drink');
+  await ana.waitForSelector('.note-snippet mark:text-is("drink")');
+  await shot(ana, '12b-notes-search');
+  await ana.fill('.notes-head input[type=search]', '');
+  // Delete goes to Deleted pages; restore brings it back.
+  await ana.click('.note-item:has-text("Session 1")');
+  ana.once('dialog', (d) => void d.accept());
+  await ana.click('.notes-foot button:text-is("Delete page")');
+  await bo.waitForSelector('.note-list button:text("Deleted pages (1)")');
+  await bo.click('.note-list button:text("Deleted pages (1)")');
+  await bo.click('.note-list li.deleted button:text-is("Restore")');
+  await ana.waitForSelector('.note-item:has-text("Session 1")');
+  await ana.click('.side-tabs button:text-is("Chat")');
+  await bo.click('.side-tabs button:text-is("Chat")');
+
+  // Dice now sit in the Dice & Cards pane at the top.
+  assert.ok(await ana.locator('.bar-pane #dice-box #roll-form').isVisible());
+
+  // Chat & notes panel: hide it, get an unread count, show it again.
   await bo.click('#side-tab');
   await bo.waitForSelector('#side', { state: 'hidden' });
   await ana.fill('#chat-form input', 'are you there?');

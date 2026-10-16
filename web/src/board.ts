@@ -25,6 +25,8 @@ export interface TableCtx {
   token(): string;
   /** The sheet templates library (build, import, export). */
   openTemplates(): void;
+  /** Dice buttons and the roll box, shown at the left of the Dice & Cards pane. */
+  dice?: HTMLElement;
 }
 
 const TABLE_W = 3200;
@@ -72,12 +74,12 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
   try {
     barCollapsed = localStorage.getItem('vtt.barCollapsed') === '1';
   } catch { /* ignore */ }
-  const barHandle = h('button.bar-handle', { type: 'button' }, 'Cards');
-  const barPane = h('div.bar-pane', {}, bar, barHandle);
+  const barHandle = h('button.bar-handle', { type: 'button' }, 'Dice & Cards');
+  const barPane = h('div.bar-pane', {}, h('div.bar-row', {}, ctx.dice ?? null, bar), barHandle);
   const setBar = (collapsed: boolean) => {
     barCollapsed = collapsed;
     barPane.classList.toggle('collapsed', collapsed);
-    barHandle.title = collapsed ? 'Show decks, rows and card tools' : 'Hide decks, rows and card tools';
+    barHandle.title = collapsed ? 'Show dice, decks, rows and card tools' : 'Hide dice, decks, rows and card tools';
     try {
       localStorage.setItem('vtt.barCollapsed', collapsed ? '1' : '0');
     } catch { /* ignore */ }

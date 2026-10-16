@@ -6,13 +6,15 @@ import {
   GoneException,
   PostToConnectionCommand,
 } from '@aws-sdk/client-apigatewaymanagementapi';
-import { TransactionCanceledException } from '@aws-sdk/client-dynamodb';
+import { ConditionalCheckFailedException, TransactionCanceledException } from '@aws-sdk/client-dynamodb';
 import { DeleteCommand, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { randomInt, randomUUID } from 'node:crypto';
 import type { APIGatewayProxyResultV2, APIGatewayProxyWebsocketEventV2 } from 'aws-lambda';
 import { apply, forbidden, OpError, publicNames, resolve } from '../../shared/engine.ts';
 import type { LogEntry, Op, RoomState } from '../../shared/model.ts';
-import { CHUNK_CHARS, type ClientMessage, type ServerMessage } from '../../shared/protocol.ts';
+import {
+  CHUNK_CHARS, type ClientMessage, NOTE_BODY_MAX, NOTE_LOCK_MS, NOTE_TITLE_MAX, type NoteChange, type NotePage, type ServerMessage,
+} from '../../shared/protocol.ts';
 import { connSk, ddb, GAME_TABLE, loadState, logSk, MAX_STATE_CHARS, roomPk, stateItem, verifySession } from './common.ts';
 
 const CONN_TTL_HOURS = 3; // API Gateway closes WebSockets after 2 hours anyway
@@ -194,6 +196,107 @@ async function commit(room: string, name: string, canGm: boolean, op: Op, cid: s
   }
 }
 
+// ---- Campaign notes ---------------------------------------------------------------------------
+// Pages live beside the room state (room#<id> / note#<page>), not in it: notes grow every session
+// and the state item is capped. Whoever is typing holds a short lock that their saves renew.
+
+const noteSk = (id: string) => `note#${id}`;
+const toPage = ({ pk: _pk, sk: _sk, ...page }: Record<string, unknown>) => page as unknown as NotePage;
+
+async function allNotes(room: string): Promise<NotePage[]> {
+  const pages: NotePage[] = [];
+  let start: Record<string, unknown> | undefined;
+  do {
+    const r = await ddb.send(new QueryCommand({
+      TableName: GAME_TABLE,
+      KeyConditionExpression: 'pk = :pk AND begins_with(sk, :n)',
+      ExpressionAttributeValues: { ':pk': roomPk(room), ':n': 'note#' },
+      ExclusiveStartKey: start,
+    }));
+    pages.push(...(r.Items ?? []).map(toPage));
+    start = r.LastEvaluatedKey;
+  } while (start);
+  return pages;
+}
+
+/** Only while nobody else holds the page's lock (or theirs has run out). */
+const FREE = 'attribute_not_exists(editor) OR editor = :me OR editorUntil < :now';
+
+async function saveNote(room: string, name: string, change: NoteChange, lock: boolean): Promise<NotePage> {
+  if (!change || typeof change !== 'object' || typeof change.id !== 'string' || !/^[\w-]{1,40}$/.test(change.id)) throw new OpError('Bad page.');
+  const { title, body, deleted } = change;
+  if (title !== undefined && (typeof title !== 'string' || !title.trim() || title.length > NOTE_TITLE_MAX)) throw new OpError(`Page titles are 1–${NOTE_TITLE_MAX} characters.`);
+  if (body !== undefined && (typeof body !== 'string' || body.length > NOTE_BODY_MAX)) throw new OpError(`A page holds at most ${NOTE_BODY_MAX.toLocaleString()} characters. Start a new page.`);
+  if (deleted !== undefined && typeof deleted !== 'boolean') throw new OpError('Bad page.');
+  const now = Date.now();
+  const iso = new Date(now).toISOString();
+  const key = { pk: roomPk(room), sk: noteSk(change.id) };
+  const existing = (await ddb.send(new GetCommand({ TableName: GAME_TABLE, Key: key }))).Item;
+
+  if (!existing) {
+    if (!title) throw new OpError('A new page needs a title.');
+    const page: NotePage = {
+      id: change.id, title: title.trim(), body: body ?? '', created: iso, createdBy: name, updated: iso, updatedBy: name,
+      ...(lock ? { editor: name, editorUntil: now + NOTE_LOCK_MS } : {}),
+    };
+    await ddb.send(new PutCommand({ TableName: GAME_TABLE, Item: { ...key, ...page }, ConditionExpression: 'attribute_not_exists(sk)' }));
+    return page;
+  }
+
+  const set: Record<string, unknown> = {};
+  if (title !== undefined) set.title = title.trim();
+  if (body !== undefined) set.body = body;
+  if (title !== undefined || body !== undefined) Object.assign(set, { updated: iso, updatedBy: name });
+  if (deleted !== undefined) set.deleted = deleted;
+  if (lock) Object.assign(set, { editor: name, editorUntil: now + NOTE_LOCK_MS });
+  const keys = Object.keys(set);
+  if (!keys.length) return toPage(existing);
+  try {
+    const r = await ddb.send(new UpdateCommand({
+      TableName: GAME_TABLE,
+      Key: key,
+      UpdateExpression: `SET ${keys.map((k) => `#${k} = :${k}`).join(', ')}`,
+      ConditionExpression: FREE,
+      ExpressionAttributeNames: Object.fromEntries(keys.map((k) => [`#${k}`, k])),
+      ExpressionAttributeValues: { ...Object.fromEntries(keys.map((k) => [`:${k}`, set[k]])), ':me': name, ':now': now },
+      ReturnValues: 'ALL_NEW',
+    }));
+    return toPage(r.Attributes!);
+  } catch (e) {
+    if (e instanceof ConditionalCheckFailedException) throw new OpError(`${String(existing.editor)} is editing this page right now.`);
+    throw e;
+  }
+}
+
+async function lockNote(room: string, name: string, id: string, lock: boolean): Promise<NotePage> {
+  if (typeof id !== 'string' || !/^[\w-]{1,40}$/.test(id)) throw new OpError('Bad page.');
+  const key = { pk: roomPk(room), sk: noteSk(id) };
+  try {
+    const r = await ddb.send(new UpdateCommand(lock
+      ? {
+          TableName: GAME_TABLE, Key: key,
+          UpdateExpression: 'SET editor = :me, editorUntil = :until',
+          ConditionExpression: `attribute_exists(sk) AND (${FREE})`,
+          ExpressionAttributeValues: { ':me': name, ':now': Date.now(), ':until': Date.now() + NOTE_LOCK_MS },
+          ReturnValues: 'ALL_NEW',
+        }
+      : {
+          TableName: GAME_TABLE, Key: key,
+          UpdateExpression: 'REMOVE editor, editorUntil',
+          ConditionExpression: 'editor = :me',
+          ExpressionAttributeValues: { ':me': name },
+          ReturnValues: 'ALL_NEW',
+        }));
+    return toPage(r.Attributes!);
+  } catch (e) {
+    if (!(e instanceof ConditionalCheckFailedException)) throw e;
+    const current = (await ddb.send(new GetCommand({ TableName: GAME_TABLE, Key: key }))).Item;
+    if (!current) throw new OpError('That page is gone.');
+    if (lock) throw new OpError(`${String(current.editor)} is editing this page right now.`);
+    return toPage(current); // releasing a lock we no longer hold: nothing to do
+  }
+}
+
 export async function handler(event: WsEvent): Promise<APIGatewayProxyResultV2> {
   const { routeKey, connectionId } = event.requestContext;
 
@@ -249,6 +352,23 @@ export async function handler(event: WsEvent): Promise<APIGatewayProxyResultV2> 
         if (!(e instanceof OpError)) console.error(e);
         const message = e instanceof OpError ? e.message : 'Server error.';
         await send(event, connectionId, { type: 'error', cid: msg.cid, message });
+      }
+      break;
+
+    case 'notes':
+      await send(event, connectionId, { type: 'notes', pages: await allNotes(room) });
+      break;
+
+    case 'note.save':
+    case 'note.lock':
+      try {
+        const page = msg.type === 'note.save'
+          ? await saveNote(room, name, msg.page, msg.lock === true)
+          : await lockNote(room, name, msg.id, msg.lock === true);
+        await broadcast(event, room, { type: 'note', page, cid: String(msg.cid ?? '').slice(0, 40) });
+      } catch (e) {
+        if (!(e instanceof OpError)) console.error(e);
+        await send(event, connectionId, { type: 'error', cid: msg.cid, message: e instanceof OpError ? e.message : 'Server error.' });
       }
       break;
 
