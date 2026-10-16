@@ -99,6 +99,14 @@ export interface Stroke {
   text?: string;
 }
 
+/** A GM's ordered set of images to show one after another (e.g. a session recap). */
+export interface Slideshow {
+  id: string;
+  name: string;
+  /** Image ids, in order. */
+  images: string[];
+}
+
 /** An audio file in the room's sound library. */
 export interface SoundDef {
   id: string;
@@ -127,6 +135,14 @@ export interface MusicState {
   volume: number;
 }
 
+export interface Spotlight {
+  image: string;
+  by: string;
+  /** Presenting slide `index` of slideshow `show`. */
+  show?: string;
+  index?: number;
+}
+
 export interface RoomState {
   id: string;
   name: string;
@@ -142,8 +158,9 @@ export interface RoomState {
   strokes?: Record<string, Stroke>;
   /** Image library (maps, handouts). Optional for older rooms. */
   images?: Record<string, ImageDef>;
-  /** The image currently shown big on everyone's screen. */
-  spotlight?: { image: string; by: string } | null;
+  /** The image currently shown big on everyone's screen; `show`/`index` when it's a slide. */
+  spotlight?: Spotlight | null;
+  slideshows?: Record<string, Slideshow>;
   /** Character sheet templates. Optional for older rooms. */
   templates?: Record<string, SheetTemplate>;
   /** Counter name -> color, shared by every piece in the room (so "poison" always looks the same). */
@@ -197,7 +214,10 @@ export type Op =
   | { kind: 'image.delete'; id: string }
   /** Set (or clear, with null) a board zone's background map. */
   | { kind: 'zone.map'; id: string; map: MapPlacement | null }
-  | { kind: 'spotlight'; spotlight: { image: string; by: string } | null }
+  | { kind: 'spotlight'; spotlight: Spotlight | null }
+  | { kind: 'slideshow.create'; show: Slideshow }
+  | { kind: 'slideshow.update'; id: string; set: { name?: string; images?: string[] } }
+  | { kind: 'slideshow.delete'; id: string }
   /** Set (or clear, with null) the color for a counter name, room-wide. */
   | { kind: 'counter.color'; name: string; color: string | null }
   | { kind: 'stroke.add'; stroke: Stroke }

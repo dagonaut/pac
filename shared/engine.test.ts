@@ -158,6 +158,24 @@ test('renaming the room', () => {
   assert.match(forbidden(s, { kind: 'room.rename', name: 'Mine' }, 'Bo', false)!, /Only the GM/);
 });
 
+test('slideshows: build, present, reorder', () => {
+  const s = room();
+  for (const id of ['a', 'b', 'c']) apply(s, { kind: 'image.create', image: { id, name: id, src: `/assets/r/${id}.png`, kind: 'handout', hidden: false, by: 'Sam' } });
+  roundTrip(s, { kind: 'slideshow.create', show: { id: 'recap', name: 'Recap', images: ['a', 'b'] } });
+  apply(s, { kind: 'slideshow.create', show: { id: 'recap', name: 'Recap', images: ['a', 'b'] } });
+  roundTrip(s, { kind: 'slideshow.update', id: 'recap', set: { images: ['b', 'a', 'c'], name: 'Recap 12' } });
+  assert.throws(() => apply(s, { kind: 'slideshow.update', id: 'recap', set: { images: ['nope'] } }), OpError);
+  // Present slide 2 (b); a slide that doesn't match the show is refused.
+  apply(s, { kind: 'spotlight', spotlight: { image: 'b', by: 'Sam', show: 'recap', index: 1 } });
+  assert.throws(() => apply(s, { kind: 'spotlight', spotlight: { image: 'a', by: 'Sam', show: 'recap', index: 1 } }), /not in the slideshow/);
+  // Reordering under it turns it back into a plain spotlight; images in a show can't be deleted.
+  apply(s, { kind: 'slideshow.update', id: 'recap', set: { images: ['a'] } });
+  assert.deepEqual(s.spotlight, { image: 'b', by: 'Sam' });
+  assert.throws(() => apply(s, { kind: 'image.delete', id: 'a' }), /slideshow/);
+  s.gm = 'Sam';
+  assert.match(forbidden(s, { kind: 'slideshow.delete', id: 'recap' }, 'Bo', false)!, /Only the GM/);
+});
+
 test('publicNames only names face-up, unhidden cards', () => {
   const s = room();
   apply(s, { kind: 'card.create', card: { id: 'c1', name: 'One', front: '/assets/r/1.png' } });

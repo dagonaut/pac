@@ -2763,3 +2763,143 @@ button.track {
 #dice-box #dice button {
   flex: 1 0 2.6rem;
 }
+
+/* ---- Slideshows (Images drawer) ---- */
+.image-grid.show-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.show-row {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 4px 8px;
+  align-items: center;
+  background: var(--panel-2);
+  border-radius: var(--radius);
+  padding: 6px;
+  border: 1px solid transparent;
+}
+
+.show-row.live {
+  border-color: var(--accent);
+}
+
+.show-thumb {
+  grid-row: span 2;
+  width: 56px;
+  height: 42px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--panel);
+  display: grid;
+  place-items: center;
+}
+
+.show-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.show-info {
+  display: grid;
+  min-width: 0;
+}
+
+.show-info b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.show-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.new-show {
+  justify-self: start;
+}
+
+dialog.show-editor {
+  width: min(680px, 92vw);
+}
+
+dialog.show-editor h4 {
+  margin: 1rem 0 0.4rem;
+  color: var(--muted-text);
+  font-size: 0.85rem;
+}
+
+.slides {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: 34vh;
+  overflow-y: auto;
+}
+
+.slides li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.slides img {
+  width: 48px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.slide-no {
+  width: 1.6rem;
+  text-align: right;
+  color: var(--muted-text);
+}
+
+.slide-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pick-grid {
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+dialog.show-editor .dialog-buttons .spacer {
+  flex: 1;
+}
+
+.slide-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+
+.slide-stepper button {
+  min-width: 2.4rem;
+  font-size: 1rem;
+}
+
+.image-grid.pick-grid {
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+}
+
+.pick-grid .thumb img {
+  height: 72px;
+  object-fit: cover;
+}
+
+.pick-grid figcaption {
+  font-size: 0.75rem;
+}

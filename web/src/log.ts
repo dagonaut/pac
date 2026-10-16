@@ -80,7 +80,15 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
     case 'image.delete': return 'deleted an image';
     case 'zone.map': return op.map ? `set the map to ${state.images?.[op.map.image]?.name ?? 'an image'} at ${Math.round(op.map.scale * 100)}%` : 'removed the map';
     case 'counter.color': return op.color ? `recolored every "${op.name}" counter` : `reset the "${op.name}" counter color`;
-    case 'spotlight': return op.spotlight ? `is showing ${state.images?.[op.spotlight.image]?.name ?? 'an image'}` : 'closed the image on screen';
+    case 'spotlight': {
+      const sp = op.spotlight;
+      if (!sp) return 'closed the image on screen';
+      const show = sp.show ? state.slideshows?.[sp.show] : undefined;
+      return `is showing ${state.images?.[sp.image]?.name ?? 'an image'}${show ? ` (${show.name}, ${sp.index! + 1} of ${show.images.length})` : ''}`;
+    }
+    case 'slideshow.create': return `made the slideshow ${op.show.name}`;
+    case 'slideshow.update': return op.set.name ? `renamed a slideshow to ${op.set.name}` : `changed the slideshow ${state.slideshows?.[op.id]?.name ?? ''}`.trim();
+    case 'slideshow.delete': return 'deleted a slideshow';
     case 'template.create': return `added the sheet template ${op.template.name}`;
     case 'template.update': return `edited the sheet template ${op.template.name}`;
     case 'template.delete': return 'deleted a sheet template';

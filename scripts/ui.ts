@@ -582,6 +582,36 @@ try {
   })).json() as { here: string[]; waiting: string[] };
   assert.deepEqual([seen.here, seen.waiting], [['Ana', 'Bo'], []]);
 
+  // ---- Slideshows: Ana lines up two images and steps through them on everyone's screen -------------
+  await ana.click('.drawer-tab');
+  await ana.click('.drawer-head button:text-is("Upload")');
+  await ana.setInputFiles('dialog.import input[type=file] >> nth=0', image);
+  await ana.check('dialog.import input[type=checkbox]'); // hidden until shown
+  await ana.click('dialog.import button[type=submit]');
+  await ana.waitForFunction(() => document.querySelectorAll('.image-grid figure').length === 2);
+  await ana.click('.image-filters button:text-is("Slideshows")');
+  ana.once('dialog', (d) => void d.accept('Recap'));
+  await ana.click('.drawer button.new-show');
+  await ana.waitForSelector('dialog.show-editor[open]');
+  await ana.click('dialog.show-editor .pick-grid figure >> nth=0 >> button');
+  await ana.waitForFunction(() => document.querySelectorAll('dialog.show-editor .slides li').length === 1);
+  await ana.click('dialog.show-editor .pick-grid figure >> nth=1 >> button');
+  await ana.waitForFunction(() => document.querySelectorAll('dialog.show-editor .slides li').length === 2);
+  await shot(ana, '12c-slideshow-editor');
+  await ana.click('dialog.show-editor button:text-is("▶ Present")');
+  await bo.waitForSelector('.spotlight:not([hidden]) .slide-stepper:has-text("Recap · 1 / 2")');
+  assert.equal(await bo.locator('.slide-stepper button').count(), 0, 'only the presenter steps');
+  await ana.click('.spotlight .slide-stepper button[title^="Next"]');
+  await bo.waitForSelector('.spotlight .slide-stepper:has-text("Recap · 2 / 2")');
+  await untilLog(bo, '(Recap, 2 of 2)');
+  await shot(bo, '12d-slideshow-presenting');
+  await ana.keyboard.press('ArrowLeft');
+  await bo.waitForSelector('.spotlight .slide-stepper:has-text("Recap · 1 / 2")');
+  await ana.click('.spotlight button:text-is("Close for everyone")');
+  await bo.waitForSelector('.spotlight', { state: 'hidden' });
+  await ana.click('.image-filters button:text-is("All")');
+  await ana.click('.drawer-tab');
+
   // ---- Campaign notes: Ana writes a page, Bo watches it update live, then edits it after her ------
   await ana.click('.side-tabs button:text-is("Notes")');
   await bo.click('.side-tabs button:text-is("Notes")');

@@ -19,6 +19,8 @@ const MAX_IMAGES = 500;
 const MAX_TEMPLATES = 50;
 const MAX_SOUNDS = 300;
 const MAX_PLAYLIST = 200;
+const MAX_SLIDESHOWS = 50;
+const MAX_SLIDES = 200;
 
 export class OpError extends Error {}
 
@@ -54,6 +56,11 @@ export function emptyMusic(): MusicState {
 /** Where the music is (seconds into the current track) at server time `now`. */
 export function musicPosition(m: MusicState, now: number): number {
   return m.playing ? Math.max(0, (now - m.startedAt) / 1000) : m.position;
+}
+
+function checkSlides(images: unknown, state: RoomState) {
+  if (!Array.isArray(images) || images.length > MAX_SLIDES) fail(`A slideshow holds at most ${MAX_SLIDES} images.`);
+  if (!images.every((id) => own(state.images, id))) fail('That image is not in the library.');
 }
 
 const STROKE_SHAPES: StrokeShape[] = ['path', 'line', 'arrow', 'rect', 'ellipse', 'text'];
@@ -430,6 +437,7 @@ export function apply(state: RoomState, op: Op): Op | null {
     case 'image.delete': {
       const img = own(state.images, op.id) ?? fail('No such image.');
       if (imageInUse(state, op.id)) fail(`"${img.name}" is in use as a map, the lobby background or on screen.`);
+      if (Object.values(state.slideshows ?? {}).some((s) => s.images.includes(op.id))) fail(`"${img.name}" is in a slideshow. Take it out of the slideshow first.`);
       delete state.images![op.id];
       return { kind: 'image.create', image: img };
     }
@@ -452,10 +460,54 @@ export function apply(state: RoomState, op: Op): Op | null {
       const sp = op.spotlight;
       if (sp !== null) {
         if (!sp || typeof sp !== 'object' || !own(state.images, sp.image) || !isText(sp.by, 40)) fail('Bad spotlight.');
+        if (sp.show !== undefined || sp.index !== undefined) {
+          const show = own(state.slideshows, sp.show) ?? fail('No such slideshow.');
+          if (!Number.isInteger(sp.index) || show.images[sp.index!] !== sp.image) fail('That slide is not in the slideshow.');
+        }
       }
       const prev = state.spotlight ?? null;
-      state.spotlight = sp ? { image: sp.image, by: sp.by } : null;
+      state.spotlight = sp ? { image: sp.image, by: sp.by, ...(sp.show !== undefined ? { show: sp.show, index: sp.index } : {}) } : null;
       return { kind: 'spotlight', spotlight: prev };
+    }
+
+    case 'slideshow.create': {
+      const show = op.show;
+      const shows = (state.slideshows ??= {});
+      if (!show || typeof show !== 'object' || !isId(show.id) || own(shows, show.id)) fail('Bad or duplicate slideshow.');
+      if (Object.keys(show).some((k) => !['id', 'name', 'images'].includes(k))) fail('Bad slideshow.');
+      if (!isKey(show.name, 80)) fail('Slideshow names are 1–80 characters.');
+      checkSlides(show.images, state);
+      if (Object.keys(shows).length >= MAX_SLIDESHOWS) fail(`A room holds at most ${MAX_SLIDESHOWS} slideshows.`);
+      shows[show.id] = { id: show.id, name: show.name, images: [...show.images] };
+      return { kind: 'slideshow.delete', id: show.id };
+    }
+
+    case 'slideshow.update': {
+      const show = own(state.slideshows, op.id) ?? fail('No such slideshow.');
+      if (!op.set || typeof op.set !== 'object') fail('Nothing to update.');
+      const keys = Object.keys(op.set);
+      if (!keys.length || keys.some((k) => k !== 'name' && k !== 'images')) fail('Only a slideshow\'s name and images can change.');
+      if (op.set.name !== undefined && !isKey(op.set.name, 80)) fail('Slideshow names are 1–80 characters.');
+      if (op.set.images !== undefined) checkSlides(op.set.images, state);
+      const prev = Object.fromEntries(keys.map((k) => [k, structuredClone(show[k as 'name' | 'images'])]));
+      Object.assign(show, structuredClone(op.set));
+      // A slide being presented that moved or went away: stop presenting it as a slide.
+      if (state.spotlight?.show === op.id && show.images[state.spotlight.index!] !== state.spotlight.image) {
+        delete state.spotlight.show;
+        delete state.spotlight.index;
+      }
+      return { kind: 'slideshow.update', id: op.id, set: prev };
+    }
+
+    case 'slideshow.delete': {
+      const show = own(state.slideshows, op.id) ?? fail('No such slideshow.');
+      delete state.slideshows![op.id];
+      if (!Object.keys(state.slideshows!).length) delete state.slideshows;
+      if (state.spotlight?.show === op.id) {
+        delete state.spotlight.show;
+        delete state.spotlight.index;
+      }
+      return { kind: 'slideshow.create', show };
     }
 
     case 'counter.color': {
@@ -657,7 +709,7 @@ export function apply(state: RoomState, op: Op): Op | null {
  *  changing the table's map and hiding/revealing cards. The server checks this per sender. */
 export function gmOnly(op: Op): boolean {
   switch (op.kind) {
-    case 'zone.map': case 'lobby': case 'room.rename': return true;
+    case 'zone.map': case 'lobby': case 'room.rename': case 'slideshow.create': case 'slideshow.update': case 'slideshow.delete': return true;
     case 'piece.update': return !!op.set && typeof op.set === 'object' && op.set.visibleTo !== undefined;
     case 'batch': return Array.isArray(op.ops) && op.ops.some(gmOnly);
     default: return false;

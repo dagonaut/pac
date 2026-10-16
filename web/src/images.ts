@@ -2,7 +2,7 @@
 // From there an image can become the table's background map, be shown big on everyone's screen
 // (the spotlight), be put on the table as a movable piece, or just be viewed privately.
 import { newPiece } from '../../shared/engine.ts';
-import type { ImageDef, Op, RoomState } from '../../shared/model.ts';
+import type { ImageDef, Op, RoomState, Slideshow } from '../../shared/model.ts';
 import { h, shortId } from './dom';
 import { uploadOne, uploadUrls } from './importer';
 import { closeMenu, heading, item, openMenu } from './menu';
@@ -26,7 +26,7 @@ const HANDOUT_SCALE = 2.5; // a handout put on the table starts ~275px wide
 const MAP_MARGIN = 400; // free table kept around a map on every side
 const MAX_FRAME = 24000; // bytes of ops per message, under the 32 KB WebSocket frame
 
-type Filter = 'all' | 'map' | 'handout';
+type Filter = 'all' | 'map' | 'handout' | 'shows';
 
 const nameFrom = (f: File) => f.name.replace(/\.[^.]+$/, '').replace(/_+/g, ' ').trim().slice(0, 120) || 'Image';
 
@@ -45,8 +45,9 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
   let query = '';
   const grid = h('div.image-grid');
   const search = h('input', { type: 'search', placeholder: 'Search', oninput: () => { query = search.value.toLowerCase(); fill(); } });
-  const filters = h('div.image-filters', {}, ...(['all', 'map', 'handout'] as Filter[]).map((f) =>
-    h('button', { type: 'button', dataset: { filter: f }, onclick: () => { filter = f; fill(); } }, f === 'all' ? 'All' : f === 'map' ? 'Maps' : 'Handouts')));
+  const filters = h('div.image-filters', {}, ...(['all', 'map', 'handout', 'shows'] as Filter[]).map((f) =>
+    h('button', { type: 'button', dataset: { filter: f }, onclick: () => { filter = f; fill(); } },
+      { all: 'All', map: 'Maps', handout: 'Handouts', shows: 'Slideshows' }[f])));
   const drawer = h('aside.drawer', { hidden: true },
     h('div.drawer-head', {},
       h('strong', {}, 'Images'),
@@ -68,6 +69,8 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
   function fill() {
     if (!open || !ctx.state()) return;
     for (const b of filters.querySelectorAll<HTMLElement>('button')) b.classList.toggle('active', b.dataset.filter === filter);
+    if (filter === 'shows') return fillShows();
+    grid.classList.remove('show-list');
     const state = st();
     const zone = ctx.tableZone();
     const currentMap = zone ? state.zones[zone]?.map?.image : undefined;
@@ -86,6 +89,98 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
     if (!list.length) {
       grid.append(h('p.muted', {}, Object.keys(state.images ?? {}).length ? 'Nothing matches.' : 'No images yet. Upload maps and handouts to share them.'));
     }
+  }
+
+  // ---- Slideshows -----------------------------------------------------------------------------
+  // The GM lines up images ahead of time (a recap, a reveal sequence) and steps through them on
+  // everyone's screen with ◀ ▶.
+
+  const shows = () => Object.values(st().slideshows ?? {}).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+  function fillShows() {
+    const state = st();
+    grid.classList.add('show-list');
+    const list = shows().filter((sh) => !query || sh.name.toLowerCase().includes(query));
+    grid.replaceChildren(...[
+      ...list.map((sh) => {
+        const first = state.images?.[sh.images[0]];
+        const live = state.spotlight?.show === sh.id;
+        return h('div.show-row', { className: live ? 'live' : '' },
+          h('div.show-thumb', {}, first ? h('img', { src: first.src, alt: '', loading: 'lazy' }) : h('span', {}, '—')),
+          h('div.show-info', {}, h('b', {}, sh.name), h('small.muted', {}, `${sh.images.length} image${sh.images.length === 1 ? '' : 's'}${live ? ' · on screen' : ''}`)),
+          h('div.show-actions', {},
+            h('button', { type: 'button', disabled: !sh.images.length, title: 'Show the first image to everyone, then step with ◀ ▶', onclick: () => void present(sh, 0) }, '▶ Present'),
+            canMap() && h('button', { type: 'button', onclick: () => editShow(sh.id) }, 'Edit')));
+      }),
+      list.length ? null : h('p.muted', {}, canMap()
+        ? 'No slideshows yet. Make one to line up images in order, like a recap of last session.'
+        : 'No slideshows yet.'),
+      canMap() ? h('button.new-show', { type: 'button', onclick: () => void newShow() }, '+ Slideshow') : null,
+    ].filter((n) => n !== null));
+  }
+
+  async function newShow(images: string[] = []) {
+    const name = prompt('Slideshow name:', `Recap, ${new Date().toLocaleDateString([], { month: 'short', day: 'numeric' })}`)?.trim().slice(0, 80);
+    if (!name) return;
+    const id = `show-${shortId()}`;
+    if (await ctx.act({ kind: 'slideshow.create', show: { id, name, images } })) editShow(id);
+  }
+
+  /** Show slide `index` of a slideshow to everyone (revealing it if it was hidden). */
+  function present(sh: Slideshow, index: number) {
+    const img = st().images?.[sh.images[index]];
+    if (!img) return;
+    return send([...reveal(img), { kind: 'spotlight', spotlight: { image: img.id, by: me(), show: sh.id, index } }]);
+  }
+
+  /** Build a slideshow: its images in order (↑ ↓ ×) and the library to add from. */
+  function editShow(id: string) {
+    const dialog = h('dialog.modal.show-editor', { onclose: () => { dialog.remove(); fill(); } });
+    const paint = () => {
+      const state = st();
+      const sh = state.slideshows?.[id];
+      if (!sh) return dialog.close();
+      const update = (set: { name?: string; images?: string[] }) => ctx.act({ kind: 'slideshow.update', id, set }).then(paint);
+      const name = h('input', { value: sh.name, maxLength: 80, 'aria-label': 'Slideshow name' });
+      name.addEventListener('change', () => name.value.trim() && void update({ name: name.value.trim() }));
+      const slides = h('ol.slides', {}, ...sh.images.map((imgId, i) => {
+        const img = state.images?.[imgId];
+        const move = (to: number) => {
+          const next = [...sh.images];
+          next.splice(to, 0, ...next.splice(i, 1));
+          void update({ images: next });
+        };
+        return h('li', {},
+          h('span.slide-no', {}, String(i + 1)),
+          img ? h('img', { src: img.src, alt: '', loading: 'lazy' }) : null,
+          h('span.slide-name', {}, img?.name ?? '?', img?.hidden ? h('small.muted', {}, ' (hidden until shown)') : null),
+          h('span.sound-actions', {},
+            h('button', { type: 'button', title: 'Earlier', disabled: i === 0, onclick: () => move(i - 1) }, '↑'),
+            h('button', { type: 'button', title: 'Later', disabled: i === sh.images.length - 1, onclick: () => move(i + 1) }, '↓'),
+            h('button', { type: 'button', title: 'Take out of the slideshow', onclick: () => void update({ images: sh.images.filter((_, j) => j !== i) }) }, '×')));
+      }));
+      const library = Object.values(state.images ?? {}).filter(canSee).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      const pick = h('div.image-grid.pick-grid', {}, ...library.map((img) =>
+        h('figure', {},
+          h('button.thumb', { type: 'button', title: `Add "${img.name}" to the end`, onclick: () => void update({ images: [...sh.images, img.id] }) },
+            h('img', { src: img.src, alt: '', loading: 'lazy' })),
+          h('figcaption', {}, img.name))));
+      dialog.replaceChildren(
+        h('h3', {}, 'Slideshow'),
+        h('label', {}, 'Name ', name),
+        sh.images.length ? slides : h('p.muted', {}, 'Empty. Click images below to add them in order.'),
+        h('h4', {}, 'Add images (click to add to the end)'),
+        library.length ? pick : h('p.muted', {}, 'No images yet. Upload some first.'),
+        h('div.dialog-buttons', {},
+          h('button.danger', { type: 'button', onclick: () => confirm(`Delete the slideshow "${sh.name}"? (The images stay.)`) && void ctx.act({ kind: 'slideshow.delete', id }).then(() => dialog.close()) }, 'Delete slideshow'),
+          h('span.spacer'),
+          h('button', { type: 'button', disabled: !sh.images.length, onclick: () => { dialog.close(); void present(sh, 0); } }, '▶ Present'),
+          h('button', { type: 'button', onclick: () => dialog.close() }, 'Done')),
+      );
+    };
+    document.body.append(dialog);
+    paint();
+    dialog.showModal();
   }
 
   // ---- Image actions --------------------------------------------------------------------------
@@ -127,6 +222,11 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
       canMap() && (state.lobby?.image === img.id
         ? item('Stop using as lobby background', () => ctx.act({ kind: 'lobby', set: { image: null } }))
         : item('Use as lobby background', () => send([...reveal(img), { kind: 'lobby', set: { image: img.id } }]))),
+      canMap() && heading('Add to slideshow'),
+      ...(canMap() ? shows().map((sh) => item(`${sh.name}${sh.images.includes(img.id) ? ' (again)' : ''}`,
+        () => ctx.act({ kind: 'slideshow.update', id: sh.id, set: { images: [...sh.images, img.id] } }))) : []),
+      canMap() && item('New slideshow starting with this…', () => newShow([img.id])),
+      !!zone && h('hr'),
       !!zone && item('Put on the table', () => {
         const cardId = `card-img-${img.id}`.slice(0, 64);
         const ops: Op[] = [...reveal(img)];
@@ -238,14 +338,22 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
     if (!sp || !img) {
       spot.hidden = true;
       chip.hidden = true;
+      minimizedKey = ''; // closed: the next time anything is shown, it pops up again
       return;
     }
-    const key = `${sp.image}|${sp.by}`;
+    // Minimizing applies to this one showing (this slide of this slideshow).
+    const key = `${sp.image}|${sp.by}|${sp.show ?? ''}|${sp.index ?? ''}`;
     const minimized = minimizedKey === key;
     const canClose = sp.by === me() || isGm();
+    const show = sp.show ? state.slideshows?.[sp.show] : undefined;
+    // The presenter (or the GM) steps through a slideshow; everyone sees which slide it is.
+    const stepper = show && sp.index !== undefined && h('span.slide-stepper', {},
+      canClose && h('button', { type: 'button', title: 'Previous (←)', disabled: sp.index === 0, onclick: () => void present(show, sp.index! - 1) }, '◀'),
+      h('span', {}, `${show.name} · ${sp.index + 1} / ${show.images.length}`),
+      canClose && h('button', { type: 'button', title: 'Next (→)', disabled: sp.index >= show.images.length - 1, onclick: () => void present(show, sp.index! + 1) }, '▶'));
     spot.replaceChildren(h('figure', {},
       h('img', { src: img.src, alt: img.name }),
-      h('figcaption', {}, h('b', {}, img.name), ` · shown by ${sp.by}`,
+      h('figcaption', {}, h('b', {}, img.name), ` · shown by ${sp.by}`, stepper || null,
         h('span.spot-buttons', {},
           h('button', { type: 'button', onclick: () => { minimizedKey = key; renderSpotlight(st()); } }, 'Minimize'),
           canClose && h('button', { type: 'button', onclick: () => void ctx.act({ kind: 'spotlight', spotlight: null }) }, 'Close for everyone')))));
@@ -254,6 +362,19 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
     chip.textContent = `On screen: ${img.name}`;
     chip.onclick = () => { minimizedKey = ''; renderSpotlight(st()); };
   }
+
+  // Arrow keys step through a slideshow being presented (presenter and GM only).
+  document.addEventListener('keydown', (e) => {
+    const sp = ctx.state()?.spotlight;
+    const tag = (e.target as HTMLElement).tagName;
+    if (!sp?.show || sp.index === undefined || spot.hidden || tag === 'INPUT' || tag === 'TEXTAREA' || (sp.by !== me() && !isGm())) return;
+    const show = st().slideshows?.[sp.show];
+    if (!show) return;
+    const to = e.key === 'ArrowRight' ? sp.index + 1 : e.key === 'ArrowLeft' ? sp.index - 1 : -1;
+    if (to < 0 || to >= show.images.length) return;
+    e.preventDefault();
+    void present(show, to);
+  });
 
   // ---- Map ------------------------------------------------------------------------------------
 
