@@ -7,6 +7,7 @@ import { h, shortId } from './dom';
 import { createDrawing } from './draw';
 import { createImages } from './images';
 import { cardName, COUNTER_COLORS, counterBadges, counterColor, faceOf, pieceEl, prunePieceEls } from './pieces';
+import { soundMenuItems } from './asset-sounds';
 import { closeMenu, heading, item, openMenu } from './menu';
 import { renderDock } from './sheets';
 import { systems } from './systems/index';
@@ -297,6 +298,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
       isGm() && item(p.visibleTo === 'all' ? 'Hide from players' : 'Show to everyone',
         () => update(p.id, { visibleTo: p.visibleTo === 'all' ? 'gm' : 'all' })),
       face.front && item('Show large', () => showPreview(p, true)),
+      ...soundMenuItems({ me: me(), state: st(), act: ctx.act }, { kind: 'card', id: p.def }),
       onBoard && sizeRow(p),
       onBoard && item(p.locked ? 'Unlock' : 'Lock in place', () => update(p.id, { locked: !p.locked }), { hint: 'L' }),
       onBoard && item('Bring to front', () => restack(p, 'front')),

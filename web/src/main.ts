@@ -698,7 +698,7 @@ async function enterRoom(id: string, button: HTMLButtonElement): Promise<boolean
         renderState(state);
         board.render(state);
         sound.render(state);
-        sound.onOp(entry.op);
+        sound.onOp(entry.op, state);
         addEntry(entry, state, me);
         countUnread(entry.op.kind, entry.by);
         showRoll(entry.by, entry.op);

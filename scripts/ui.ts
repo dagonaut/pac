@@ -544,6 +544,26 @@ try {
   await bo.click('#sound-btn');
   await shot(bo, '11b-sound-player');
   await bo.click('#sound-btn');
+  // Sounds on assets: link Boom to the map image as its reveal sound; showing it plays Boom for Bo.
+  await ana.click('#sound-btn'); // close the panel
+  await bo.waitForFunction(() => !document.querySelector('#sfx-audio audio'), null, { timeout: 10000 }); // the first Boom ended
+  await ana.click('.drawer-tab');
+  await ana.click('.image-grid .thumb');
+  await ana.click('.menu .menu-item:text-is("Add sounds…")');
+  await ana.waitForSelector('dialog.asset-sounds[open]');
+  await ana.check('dialog.asset-sounds .asset-sound-list li:has-text("Boom") input[type=checkbox]');
+  await ana.check('dialog.asset-sounds .asset-sound-list li:has-text("Boom") input[type=radio]');
+  await shot(ana, '11d-asset-sounds');
+  await ana.click('dialog.asset-sounds button:text-is("Save")');
+  await untilLog(bo, 'linked 1 sound to');
+  await ana.click('.image-grid .thumb');
+  await ana.waitForSelector('.menu .menu-item:text-is("♪ Boom (on reveal)")');
+  await ana.click('.menu .menu-item:text-is("Show to everyone")');
+  await bo.waitForSelector('#sfx-audio audio', { state: 'attached', timeout: 10000 });
+  await ana.click('.spotlight button:text-is("Close for everyone")');
+  await ana.click('.drawer-tab');
+  await ana.click('#sound-btn'); // back to the panel
+
   // Pause stops everyone.
   await ana.click('.sound-panel .transport .play');
   await bo.waitForFunction(() => (document.querySelector('#music-audio') as HTMLAudioElement).paused);

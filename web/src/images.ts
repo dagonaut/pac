@@ -5,6 +5,7 @@ import { newPiece } from '../../shared/engine.ts';
 import type { ImageDef, Op, RoomState, Slideshow } from '../../shared/model.ts';
 import { h, shortId } from './dom';
 import { uploadOne, uploadUrls } from './importer';
+import { soundMenuItems } from './asset-sounds';
 import { closeMenu, heading, item, openMenu } from './menu';
 
 export interface ImagesCtx {
@@ -222,6 +223,7 @@ export function createImages(area: HTMLElement, surface: HTMLElement, ctx: Image
       canMap() && (state.lobby?.image === img.id
         ? item('Stop using as lobby background', () => ctx.act({ kind: 'lobby', set: { image: null } }))
         : item('Use as lobby background', () => send([...reveal(img), { kind: 'lobby', set: { image: img.id } }]))),
+      ...soundMenuItems({ me: me(), state, act: ctx.act }, { kind: 'image', id: img.id }),
       canMap() && heading('Add to slideshow'),
       ...(canMap() ? shows().map((sh) => item(`${sh.name}${sh.images.includes(img.id) ? ' (again)' : ''}`,
         () => ctx.act({ kind: 'slideshow.update', id: sh.id, set: { images: [...sh.images, img.id] } }))) : []),

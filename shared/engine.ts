@@ -58,6 +58,13 @@ export function musicPosition(m: MusicState, now: number): number {
   return m.playing ? Math.max(0, (now - m.startedAt) / 1000) : m.position;
 }
 
+function checkAssetSounds(sounds: unknown, onReveal: unknown, state: RoomState) {
+  if (!Array.isArray(sounds) || sounds.length > 20) fail('An asset has at most 20 sounds.');
+  if (!sounds.every((id) => own(state.sounds, id)?.kind === 'sfx')) fail('Asset sounds must be sound effects in the library.');
+  if (new Set(sounds).size !== sounds.length) fail('That sound is already linked.');
+  if (onReveal !== null && (typeof onReveal !== 'string' || !sounds.includes(onReveal))) fail('The reveal sound must be one of its sounds.');
+}
+
 function checkSlides(images: unknown, state: RoomState) {
   if (!Array.isArray(images) || images.length > MAX_SLIDES) fail(`A slideshow holds at most ${MAX_SLIDES} images.`);
   if (!images.every((id) => own(state.images, id))) fail('That image is not in the library.');
@@ -141,8 +148,9 @@ function checkCard(c: Partial<CardDef>, partial: boolean, state: RoomState) {
       fail(`Card ${k} must be an image uploaded to this room.`);
     }
   }
-  const extra = Object.keys(c).filter((k) => !['id', 'name', 'front', 'back', 'upgraded'].includes(k));
+  const extra = Object.keys(c).filter((k) => !['id', 'name', 'front', 'back', 'upgraded', 'sounds', 'onReveal'].includes(k));
   if (extra.length) fail(`Unknown card field ${extra[0]}.`);
+  if (c.sounds !== undefined || c.onReveal !== undefined) checkAssetSounds(c.sounds ?? [], c.onReveal ?? null, state);
 }
 
 function checkPieceProps(set: Partial<PieceProps>, state: RoomState) {
@@ -410,14 +418,18 @@ export function apply(state: RoomState, op: Op): Op | null {
       const img = op.image;
       const images = (state.images ??= {});
       if (!img || typeof img !== 'object' || !isId(img.id) || own(images, img.id)) fail('Bad or duplicate image.');
-      const extra = Object.keys(img).find((k) => !['id', 'name', 'src', 'kind', 'hidden', 'by'].includes(k));
+      const extra = Object.keys(img).find((k) => !['id', 'name', 'src', 'kind', 'hidden', 'by', 'sounds', 'onReveal'].includes(k));
       if (extra) fail(`Unknown image field ${extra}.`);
       if (!isKey(img.name, 120)) fail('Image names are 1–120 characters.');
       if (!isArt(img.src, state)) fail('Images must be uploaded to this room.');
       if (img.kind !== 'map' && img.kind !== 'handout') fail('An image is a map or a handout.');
       if (typeof img.hidden !== 'boolean' || !isText(img.by, 40)) fail('Bad image.');
       if (Object.keys(images).length >= MAX_IMAGES) fail(`A room holds at most ${MAX_IMAGES} images.`);
-      images[img.id] = { id: img.id, name: img.name, src: img.src, kind: img.kind, hidden: img.hidden, by: img.by };
+      if (img.sounds !== undefined || img.onReveal !== undefined) checkAssetSounds(img.sounds ?? [], img.onReveal ?? null, state);
+      images[img.id] = {
+        id: img.id, name: img.name, src: img.src, kind: img.kind, hidden: img.hidden, by: img.by,
+        ...(img.sounds?.length ? { sounds: [...img.sounds] } : {}), ...(img.onReveal ? { onReveal: img.onReveal } : {}),
+      };
       return { kind: 'image.delete', id: img.id };
     }
 
@@ -611,6 +623,12 @@ export function apply(state: RoomState, op: Op): Op | null {
       const snd = own(state.sounds, op.id) ?? fail('No such sound.');
       delete state.sounds![op.id];
       if (state.lobby?.music === op.id) delete state.lobby.music;
+      for (const asset of [...Object.values(state.images ?? {}), ...Object.values(state.cards)]) {
+        if (!asset.sounds?.includes(op.id)) continue;
+        asset.sounds = asset.sounds.filter((id) => id !== op.id);
+        if (!asset.sounds.length) delete asset.sounds;
+        if (asset.onReveal === op.id) delete asset.onReveal;
+      }
       const m = state.music;
       if (m?.playlist.includes(op.id)) {
         const current = m.playlist[m.index];
@@ -680,6 +698,19 @@ export function apply(state: RoomState, op: Op): Op | null {
       return { kind: 'lobby', set: prev };
     }
 
+    case 'asset.sounds': {
+      const a = op.asset;
+      const target = a?.kind === 'image' ? own(state.images, a.id) : a?.kind === 'card' ? own(state.cards, a.id) : undefined;
+      if (!target) fail('No such image or card.');
+      checkAssetSounds(op.sounds, op.onReveal, state);
+      const prev: Op = { kind: 'asset.sounds', asset: { kind: a.kind, id: a.id }, sounds: [...(target.sounds ?? [])], onReveal: target.onReveal ?? null };
+      if (op.sounds.length) target.sounds = [...op.sounds];
+      else delete target.sounds;
+      if (op.onReveal) target.onReveal = op.onReveal;
+      else delete target.onReveal;
+      return prev;
+    }
+
     case 'sfx':
       if (op.sound !== null && !own(state.sounds, op.sound)) fail('No such sound.');
       return null;
@@ -709,7 +740,7 @@ export function apply(state: RoomState, op: Op): Op | null {
  *  changing the table's map and hiding/revealing cards. The server checks this per sender. */
 export function gmOnly(op: Op): boolean {
   switch (op.kind) {
-    case 'zone.map': case 'lobby': case 'room.rename': case 'slideshow.create': case 'slideshow.update': case 'slideshow.delete': return true;
+    case 'zone.map': case 'lobby': case 'room.rename': case 'asset.sounds': case 'slideshow.create': case 'slideshow.update': case 'slideshow.delete': return true;
     case 'piece.update': return !!op.set && typeof op.set === 'object' && op.set.visibleTo !== undefined;
     case 'batch': return Array.isArray(op.ops) && op.ops.some(gmOnly);
     default: return false;

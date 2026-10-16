@@ -176,6 +176,25 @@ test('slideshows: build, present, reorder', () => {
   assert.match(forbidden(s, { kind: 'slideshow.delete', id: 'recap' }, 'Bo', false)!, /Only the GM/);
 });
 
+test('sounds linked to images and cards', () => {
+  const s = room();
+  apply(s, { kind: 'image.create', image: { id: 'gg', name: 'Glink glonk', src: '/assets/r/gg.png', kind: 'handout', hidden: false, by: 'Sam' } });
+  apply(s, { kind: 'card.create', card: { id: 'cave', name: 'Cave', front: '/assets/r/cave.png' } });
+  for (const id of ['roar', 'drip']) apply(s, { kind: 'sound.create', sound: { id, name: id, src: `/assets/r/${id}.mp3`, kind: 'sfx', by: 'Sam' } });
+  apply(s, { kind: 'sound.create', sound: { id: 'theme', name: 'Theme', src: '/assets/r/theme.mp3', kind: 'music', by: 'Sam' } });
+  roundTrip(s, { kind: 'asset.sounds', asset: { kind: 'image', id: 'gg' }, sounds: ['roar', 'drip'], onReveal: 'roar' });
+  apply(s, { kind: 'asset.sounds', asset: { kind: 'image', id: 'gg' }, sounds: ['roar', 'drip'], onReveal: 'roar' });
+  apply(s, { kind: 'asset.sounds', asset: { kind: 'card', id: 'cave' }, sounds: ['drip'], onReveal: null });
+  assert.throws(() => apply(s, { kind: 'asset.sounds', asset: { kind: 'card', id: 'cave' }, sounds: ['theme'], onReveal: null }), /sound effects/);
+  assert.throws(() => apply(s, { kind: 'asset.sounds', asset: { kind: 'card', id: 'cave' }, sounds: ['drip'], onReveal: 'roar' }), /reveal sound/);
+  // Undoing a delete brings the sounds back with the asset.
+  roundTrip(s, { kind: 'image.delete', id: 'gg' });
+  roundTrip(s, { kind: 'card.delete', id: 'cave' });
+  // Deleting a sound unlinks it.
+  apply(s, { kind: 'sound.delete', id: 'roar' });
+  assert.deepEqual([s.images!.gg.sounds, s.images!.gg.onReveal], [['drip'], undefined]);
+});
+
 test('publicNames only names face-up, unhidden cards', () => {
   const s = room();
   apply(s, { kind: 'card.create', card: { id: 'c1', name: 'One', front: '/assets/r/1.png' } });

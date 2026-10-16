@@ -4,6 +4,7 @@
 import { emptyMusic, musicPosition } from '../../shared/engine.ts';
 import type { MusicLoop, MusicState, Op, RoomState, SoundDef } from '../../shared/model.ts';
 import { h, shortId, toast } from './dom';
+import { revealSounds } from './asset-sounds';
 import { uploadOne, uploadUrls } from './importer';
 
 export interface SoundCtx {
@@ -366,10 +367,12 @@ export function createSound(header: HTMLElement, ctx: SoundCtx) {
     if (!(panel.contains(document.activeElement) && (document.activeElement as HTMLInputElement).type === 'range')) paint();
   }
 
-  /** A live op (not one from a snapshot): play effects as they happen. */
-  function onOp(op: Op) {
+  /** A live op (not one from a snapshot): play effects as they happen, including an asset's
+   *  reveal sound when it's shown, put on the table or turned face up. */
+  function onOp(op: Op, state?: RoomState) {
     if (op.kind === 'sfx') playSfx(op.sound);
-    else if (op.kind === 'batch') op.ops.forEach(onOp);
+    else if (op.kind === 'batch') op.ops.forEach((o) => onOp(o));
+    if (state && op.kind !== 'sfx') for (const id of new Set(revealSounds(state, op))) playSfx(id);
   }
 
   function stop() {

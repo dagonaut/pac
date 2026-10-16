@@ -119,6 +119,10 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
       if (op.set.image !== undefined) return op.set.image ? `set the lobby background to ${state.images?.[op.set.image]?.name ?? 'an image'}` : 'removed the lobby background';
       return op.set.music ? `set the lobby music to ${state.sounds?.[op.set.music]?.name ?? 'a track'}` : 'turned off the lobby music';
     }
+    case 'asset.sounds': {
+      const a = op.asset.kind === 'image' ? state.images?.[op.asset.id] : state.cards[op.asset.id];
+      return op.sounds.length ? `linked ${op.sounds.length} sound${op.sounds.length === 1 ? '' : 's'} to ${a?.name ?? 'an asset'}` : `unlinked the sounds from ${a?.name ?? 'an asset'}`;
+    }
     case 'room.rename': return `renamed the table to ${op.name}`;
     case 'sfx': return op.sound ? `played ${state.sounds?.[op.sound]?.name ?? 'a sound effect'}` : 'stopped the sound effects';
     case 'stroke.update': return op.set.text !== undefined ? `changed text to "${firstLine(op.set.text)}"` : 'moved a drawing';

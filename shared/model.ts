@@ -42,6 +42,9 @@ export interface ImageDef {
   /** Only the GM seat and the uploader see it in the drawer until it's revealed (honor system). */
   hidden: boolean;
   by: string;
+  /** Sound effects that go with it (ids in RoomState.sounds); `onReveal` plays when it's shown. */
+  sounds?: string[];
+  onReveal?: string;
 }
 
 /** Imported card art. `back` falls back to the deck's back; `upgraded` replaces the front. */
@@ -51,6 +54,10 @@ export interface CardDef {
   front: string;
   back?: string;
   upgraded?: string;
+  /** Sound effects that go with it (ids in RoomState.sounds); `onReveal` plays when it's turned
+   *  face up or put on the table. */
+  sounds?: string[];
+  onReveal?: string;
 }
 
 export interface Piece {
@@ -233,6 +240,8 @@ export type Op =
   | { kind: 'music'; set: { playlist?: string[]; index?: number; playing?: boolean; position?: number; loop?: MusicLoop; shuffle?: boolean; volume?: number }; at?: number }
   /** Set (or clear, with null) the lobby's background image and music. */
   | { kind: 'lobby'; set: { image?: string | null; music?: string | null } }
+  /** Link sound effects to an image or card (and pick which, if any, plays when it's revealed). */
+  | { kind: 'asset.sounds'; asset: { kind: 'image' | 'card'; id: string }; sounds: string[]; onReveal: string | null }
   /** Play a sound effect once on everyone's speakers (`sound: null` stops all effects). */
   | { kind: 'sfx'; sound: string | null }
   | { kind: 'batch'; ops: Op[] }

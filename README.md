@@ -12,7 +12,7 @@ Prototype, usable at the table:
 - **Table**: pan/zoom, optional grid, resizable pieces that can be locked in place and brought to the front or sent to the back, **live drawing** (freehand, lines, arrows, boxes, circles, text labels), and pings.
 - **Dice**: expressions like `2d6+3`, rolled on the server (in the top Dice & Cards pane). Chat, a log of every action, and undo.
 - **Campaign notes**: a shared, searchable notebook per room. One person writes in a page at a time while everyone else watches it update live.
-- **Music and sound effects** (GM only): upload tracks into a playlist (repeat, shuffle, room volume for fades) that every browser plays in sync, plus a soundboard of one-shot effects layered on top. Everyone sets their own volume.
+- **Music and sound effects** (GM only): upload tracks into a playlist (repeat, shuffle, room volume for fades) that every browser plays in sync, plus a soundboard of one-shot effects layered on top, which can also be linked to images and cards (played from their menu, or automatically when they're revealed). Everyone sets their own volume.
 
 ## Layout
 
