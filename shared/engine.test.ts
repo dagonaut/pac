@@ -149,6 +149,15 @@ test('lobby background and music', () => {
   assert.match(forbidden(s, { kind: 'lobby', set: { image: null } }, 'Bo', false)!, /Only the GM/);
 });
 
+test('renaming the room', () => {
+  const s = room();
+  roundTrip(s, { kind: 'room.rename', name: 'Portal: season 2' });
+  assert.throws(() => apply(s, { kind: 'room.rename', name: ' ' }), OpError);
+  assert.throws(() => apply(s, { kind: 'room.rename', name: 'x'.repeat(61) }), OpError);
+  s.gm = 'Sam';
+  assert.match(forbidden(s, { kind: 'room.rename', name: 'Mine' }, 'Bo', false)!, /Only the GM/);
+});
+
 test('publicNames only names face-up, unhidden cards', () => {
   const s = room();
   apply(s, { kind: 'card.create', card: { id: 'c1', name: 'One', front: '/assets/r/1.png' } });

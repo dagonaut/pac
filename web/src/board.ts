@@ -257,6 +257,16 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
     );
   }
 
+  /** Take a piece out of play. The card itself stays in the Library (add it back from there). */
+  function removeItem(p: Piece) {
+    const zone = st().zones[p.zone];
+    const where = zone?.kind === 'board' ? 'the table' : zone?.kind === 'slots' || zone?.owner ? 'the sheet' : zoneTitle(zone!);
+    const label = zone?.kind === 'board' ? 'Remove from table' : zone?.kind === 'slots' || zone?.owner ? 'Remove from sheet' : `Remove from ${zone?.label ?? 'here'}`;
+    return item(label, () =>
+      confirm(`Remove ${cardName(p, st(), me())} from ${where}? The card stays in the Library, so you can add it back.`) &&
+      ctx.act({ kind: 'piece.delete', id: p.id }), { danger: true });
+  }
+
   /** Move a table piece above (or below) everything else on the table. Stacking follows index. */
   function restack(p: Piece, to: 'front' | 'back') {
     const others = piecesIn(st(), p.zone).filter((q) => q.id !== p.id).map((q) => q.index);
@@ -292,7 +302,7 @@ export function createBoard(root: HTMLElement, ctx: TableCtx) {
       p.locked ? h('p.menu-hint', {}, 'Locked: unlock it to move it or send it elsewhere.') : heading('Send to'),
       ...(p.locked ? [] : sendToItems(p)),
       h('hr'),
-      item('Delete card', () => confirm(`Remove ${cardName(p, st(), me())} from the table?`) && ctx.act({ kind: 'piece.delete', id: p.id }), { danger: true }),
+      removeItem(p),
     );
   }
 

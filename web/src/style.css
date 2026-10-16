@@ -2428,8 +2428,10 @@ button.track {
 .lobby-card {
   position: relative;
   width: min(720px, 100%);
-  background: color-mix(in srgb, var(--panel) 88%, transparent);
-  backdrop-filter: blur(6px);
+  /* See-through enough to enjoy the lobby art; the slight blur keeps text readable over it. */
+  background: color-mix(in srgb, var(--panel) 62%, transparent);
+  backdrop-filter: blur(2px);
+  text-shadow: 0 1px 3px #000c;
   border: 1px solid #4a3f31;
   border-radius: var(--radius);
   box-shadow: 0 20px 60px #000b;
@@ -2567,4 +2569,26 @@ button.track {
 .sound-actions button.active {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+#room-name.editable {
+  cursor: pointer;
+  border-bottom: 1px dashed transparent;
+}
+
+#room-name.editable:hover {
+  border-bottom-color: var(--muted-text);
+}
+
+/* Every sheet's Notes box: takes the rest of the row (or a row of its own). */
+.sheet-notes {
+  flex: 1 1 18rem;
+}
+
+.sheet-notes textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  font-size: 0.85rem;
+  padding: 4px 6px;
 }

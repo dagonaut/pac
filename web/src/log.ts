@@ -38,6 +38,7 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
       const f = tpl?.sections.flatMap((s) => s.fields ?? []).find((x) => x.id === op.key);
       const key = f?.label ?? op.key;
       const where = z?.owner ? `${z.owner}'s sheet` : zone(op.zone);
+      if (op.key === '_notes') return `updated the player notes on ${where}`;
       if (op.value === null) return `removed ${key} from ${where}`;
       const value = f?.type === 'checkbox' ? (op.value === 'true' ? 'on' : 'off') : f?.type === 'longtext' ? '…' : op.value;
       return `set ${key} to ${value} on ${where}`;
@@ -110,6 +111,7 @@ function describe(op: Op, state: RoomState, me: string, names: Record<string, st
       if (op.set.image !== undefined) return op.set.image ? `set the lobby background to ${state.images?.[op.set.image]?.name ?? 'an image'}` : 'removed the lobby background';
       return op.set.music ? `set the lobby music to ${state.sounds?.[op.set.music]?.name ?? 'a track'}` : 'turned off the lobby music';
     }
+    case 'room.rename': return `renamed the table to ${op.name}`;
     case 'sfx': return op.sound ? `played ${state.sounds?.[op.sound]?.name ?? 'a sound effect'}` : 'stopped the sound effects';
     case 'stroke.update': return op.set.text !== undefined ? `changed text to "${firstLine(op.set.text)}"` : 'moved a drawing';
     case 'batch': {

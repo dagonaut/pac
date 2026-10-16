@@ -255,6 +255,13 @@ export function apply(state: RoomState, op: Op): Op | null {
       return { kind: 'gm', seat: prev };
     }
 
+    case 'room.rename': {
+      if (!isKey(op.name, 60) || op.name !== op.name.trim()) fail('Room names are 1–60 characters.');
+      const prev = state.name;
+      state.name = op.name;
+      return { kind: 'room.rename', name: prev };
+    }
+
     case 'zone.create':
       checkZone(op.zone);
       if (op.zone.map !== undefined) checkMap(op.zone.map, state);
@@ -650,7 +657,7 @@ export function apply(state: RoomState, op: Op): Op | null {
  *  changing the table's map and hiding/revealing cards. The server checks this per sender. */
 export function gmOnly(op: Op): boolean {
   switch (op.kind) {
-    case 'zone.map': case 'lobby': return true;
+    case 'zone.map': case 'lobby': case 'room.rename': return true;
     case 'piece.update': return !!op.set && typeof op.set === 'object' && op.set.visibleTo !== undefined;
     case 'batch': return Array.isArray(op.ops) && op.ops.some(gmOnly);
     default: return false;

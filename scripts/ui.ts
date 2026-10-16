@@ -144,6 +144,12 @@ try {
   await bo.waitForSelector('.table-surface .piece.tapped.face-down');
   assert.match(await log(bo), /imported/);
 
+  // ---- Renaming the table: click its name in the header; Bo sees the new name ---------------------
+  ana.once('dialog', (d) => void d.accept(`${roomName} (renamed)`));
+  await ana.click('#room-name.editable');
+  await bo.waitForFunction((n) => document.querySelector('#room-name')?.textContent === n, `${roomName} (renamed)`);
+  await untilLog(bo, 'renamed the table to');
+
   // ---- Sheets: Ana creates hers and slots the card as a weapon ----------------------------------
   await ana.click('text=Create my sheet');
   await ana.click('.menu .menu-item:text-is("Example raider")'); // the Example system ships this template
@@ -178,6 +184,10 @@ try {
   await untilLog(ana, 'rolled INT (2d6+2)');
   await ana.locator('.sf-track .track-box').nth(1).click();
   await ana.waitForFunction(() => document.querySelectorAll('.sf-track .track-box.filled').length === 2);
+  // Every sheet has a Notes box; Bo will see what Ana writes.
+  await ana.fill('.sheet-notes textarea', 'Owe the dockmaster 20 coin.');
+  await ana.locator('.sheet-notes textarea').blur();
+  await untilLog(bo, "updated the player notes on Ana's sheet");
   await shot(ana, '05-sheet');
 
   // Templates: build one, export it, import it back.
@@ -460,6 +470,7 @@ try {
   assert.equal(await bo.locator('.piece.ghost').count(), 0, 'no drag for a locked card');
   await bo.mouse.up();
   await bo.waitForSelector('.menu .menu-item:text-is("Unlock")'); // a click still opens its menu
+  assert.equal(await bo.locator('.menu .menu-item:text-is("Remove from table")').count(), 1, 'says Remove, not Delete');
   await shot(bo, '09b-locked-menu');
   await bo.keyboard.press('Escape');
   assert.equal(await lockEl(bo).evaluate((e) => (e as HTMLElement).style.left), left0);

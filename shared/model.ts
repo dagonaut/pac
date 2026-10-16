@@ -177,6 +177,7 @@ export type Op =
   /** Only for templates no sheet uses. */
   | { kind: 'template.delete'; id: string }
   | { kind: 'gm'; seat: string | null }
+  | { kind: 'room.rename'; name: string }
   | { kind: 'zone.create'; zone: Zone }
   | { kind: 'zone.delete'; id: string }
   | { kind: 'zone.update'; id: string; set: { label?: string; slots?: string[] } }

@@ -29,9 +29,24 @@ const isNumber = (v: string) => /^-?\d+$/.test(v.trim());
 
 // ---- Free-form fields (sheets without a template) -------------------------------------------
 
+/** Every sheet's free-form notes, whatever its template (stored as a field under this key). */
+const NOTES_KEY = '_notes';
+
+function notesBox(z: Zone, ctx: DockCtx) {
+  const area = h('textarea', {
+    rows: 3,
+    maxLength: 4000,
+    placeholder: z.owner === ctx.me ? 'Anything you want to remember. The table can read it.' : '',
+    dataset: { field: `${z.id}/${NOTES_KEY}` },
+    onchange: () => void ctx.act({ kind: 'field.set', zone: z.id, key: NOTES_KEY, value: area.value.trim() ? area.value : null }),
+  });
+  area.value = z.fields?.[NOTES_KEY] ?? '';
+  return h('section.sheet-section.sheet-notes', {}, h('h4', {}, 'Player notes'), area);
+}
+
 function fieldsEditor(z: Zone, ctx: DockCtx) {
   const set = (key: string, value: string | null) => ctx.act({ kind: 'field.set', zone: z.id, key, value });
-  const rows = Object.entries(z.fields ?? {}).map(([key, value]) => {
+  const rows = Object.entries(z.fields ?? {}).filter(([key]) => key !== NOTES_KEY).map(([key, value]) => {
     const input = h('input', {
       value,
       maxLength: 500,
@@ -194,7 +209,7 @@ function renderTemplated(z: Zone, tpl: SheetTemplate, state: RoomState, ctx: Doc
   const extra = pieces.filter((p) => !(Math.round(p.index) >= 0 && Math.round(p.index) < slotIndex));
   return h('div.zone.sheet-t', { dataset: { zone: z.id, kind: z.kind } },
     ctx.zoneHeader(z, pieces.length),
-    h('div.sheet-sections', {}, ...sections),
+    h('div.sheet-sections', {}, ...sections, notesBox(z, ctx)),
     extra.length > 0 && h('div.strip-cards', {}, ...extra.map((p) => pieceEl(p, state, ctx.me))));
 }
 
@@ -301,7 +316,7 @@ export function renderDock(dock: HTMLElement, state: RoomState, ctx: DockCtx) {
     const tpl = z.template ? state.templates?.[z.template] : undefined;
     body.append(tpl
       ? renderTemplated(z, tpl, state, ctx)
-      : h('div.sheet', {}, ctx.renderZone(z, state), fieldsEditor(z, ctx)));
+      : h('div.sheet', {}, ctx.renderZone(z, state), fieldsEditor(z, ctx), z.kind === 'slots' && notesBox(z, ctx)));
   }
   if (zones.length) {
     const add = h('button.add-zone-btn', { type: 'button' }, '+ Zone');

@@ -455,6 +455,10 @@ function showRoll(by: string, op: Op) {
 
 function renderState(state: RoomState) {
   $('#room-name').textContent = state.name;
+  // The GM (or anyone, while nobody holds the seat) can rename the table by clicking its name.
+  const canRename = !state.gm || state.gm === me;
+  $('#room-name').classList.toggle('editable', canRename);
+  $('#room-name').title = canRename ? 'Click to rename this table' : '';
   $('#room-system').textContent = systemName(state.system);
   $('#gm-status').textContent = state.gm ? `GM: ${state.gm}` : 'No GM';
   gmBtn.textContent = state.gm === me ? 'Leave GM seat' : state.gm ? 'Take over GM seat' : 'Take GM seat';
@@ -520,6 +524,13 @@ gmBtn.addEventListener('click', () => {
 });
 
 $('#undo-btn').addEventListener('click', () => void act({ kind: 'undo' }));
+
+$('#room-name').addEventListener('click', () => {
+  const state = game?.state;
+  if (!state || (state.gm && state.gm !== me)) return;
+  const name = prompt('Table name:', state.name)?.trim().slice(0, 60);
+  if (name && name !== state.name) void act({ kind: 'room.rename', name });
+});
 
 // ---- Chat & dice panel toggle ---------------------------------------------------------------
 
